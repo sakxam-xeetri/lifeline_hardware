@@ -14,6 +14,7 @@
 #include "LoRaComm.h"
 #include "WiFiPortal.h"
 #include "APIClient.h"
+#include "OTAManager.h"
 
 // Static serial debugger variables
 static String serialInputBuffer = "";
@@ -82,6 +83,9 @@ void loop() {
                     Serial.printf("[WIFI] Auto-connecting to %d stored network(s). Primary: %s\n", networkCount, activeSSID.c_str());
                     bool connected = connectToWiFi();
                     if (connected) {
+                        // Check for Remote OTA updates from VPS immediately on boot
+                        checkAndPerformOTA();
+                        
                         currentScreen = SCREEN_IDLE;
                         drawIdleScreen();
                         Serial.println(F("[STATE] WiFi connected -> Switched to IDLE"));

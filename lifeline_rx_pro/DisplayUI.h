@@ -52,6 +52,13 @@ void drawCountdownScreen(int remainingSec);
 void drawProgressCountdownScreen(unsigned long elapsedMs, unsigned long totalMs);
 void drawWiFiPortalScreen();
 
+// OTA Update Screens
+void drawOTACheckingScreen();
+void drawOTAFoundScreen(const String& newVer);
+void drawOTAProgressScreen(int percent);
+void drawOTAFailedScreen(const String& reason);
+void drawOTASuccessScreen();
+
 // History
 void addToHistory(int deviceId, int alertIndex, int rssi);
 

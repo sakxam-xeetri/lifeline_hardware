@@ -21,6 +21,8 @@
 //                              WIFI & API CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════════════
 #define API_ENDPOINT        "https://zenithkandel.com.np/lifeline/API/Create/message.php"
+#define OTA_VERSION_URL     "https://zenithkandel.com.np/lifeline/ota/version.json"
+#define OTA_CHECK_TIMEOUT_MS 10000         // OTA Manifest fetch timeout (10 seconds)
 #define WIFI_AP_SSID        "LifeLine-RX-Setup"
 #define WIFI_PORTAL_TIMEOUT 180000         // Portal timeout: 3 minutes (ms)
 #define WIFI_CONNECT_TIMEOUT 8000          // Connection timeout per network: 8 seconds (ms)
@@ -165,7 +167,8 @@ enum ScreenState {
     SCREEN_IDLE,            // 5 - Listening / home screen
     SCREEN_ALERT,           // 6 - Alert display screen (15s timeout)
     SCREEN_HISTORY,         // 7 - History
-    SCREEN_SYSTEM_INFO      // 8 - System info
+    SCREEN_SYSTEM_INFO,     // 8 - System info
+    SCREEN_OTA              // 9 - Remote OTA Firmware Update Screen
 };
 
 #define SERIAL_DEBUG_ENABLED true

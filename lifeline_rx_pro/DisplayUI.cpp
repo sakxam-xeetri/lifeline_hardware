@@ -274,3 +274,41 @@ void drawWiFiPortalScreen() {
     printLCDLine(0, "AP:LifeLine-RX  ");
     printLCDLine(1, "192.168.4.1     ");
 }
+
+void drawOTACheckingScreen() {
+    printLCDLine(0, "Checking OTA...");
+    printLCDLine(1, "Connecting VPS..");
+}
+
+void drawOTAFoundScreen(const String& newVer) {
+    printLCDLine(0, "New FW Found!   ");
+    String line1 = "Ver: " + newVer;
+    printLCDLine(1, line1);
+}
+
+void drawOTAProgressScreen(int percent) {
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    
+    char line0[17];
+    snprintf(line0, sizeof(line0), "Updating FW %3d%%", percent);
+    printLCDLine(0, line0);
+    
+    uint8_t filled = (percent * 16) / 100;
+    char bar[17];
+    for (uint8_t i = 0; i < 16; i++) {
+        bar[i] = (i < filled) ? '=' : ' ';
+    }
+    bar[16] = '\0';
+    printLCDLine(1, bar);
+}
+
+void drawOTAFailedScreen(const String& reason) {
+    printLCDLine(0, "OTA Update Fail!");
+    printLCDLine(1, reason);
+}
+
+void drawOTASuccessScreen() {
+    printLCDLine(0, "OTA Complete!   ");
+    printLCDLine(1, "Rebooting...    ");
+}
