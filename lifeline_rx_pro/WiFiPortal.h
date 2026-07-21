@@ -3,8 +3,10 @@
 
 #include "Config.h"
 #include <WebServer.h>
+#include <DNSServer.h>
 
 extern WebServer wifiServer;
+extern DNSServer dnsServer;
 
 extern bool wifiConnected;
 extern bool portalActive;

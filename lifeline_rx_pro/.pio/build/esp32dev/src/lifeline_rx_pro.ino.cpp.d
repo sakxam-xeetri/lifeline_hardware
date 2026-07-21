@@ -70,4 +70,6 @@
  C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/Uri.h \
  C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/middleware/Middleware.h \
  C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/detail/RequestHandler.h \
+ C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/DNSServer/src/DNSServer.h \
+ C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/AsyncUDP/src/AsyncUDP.h \
  APIClient.h

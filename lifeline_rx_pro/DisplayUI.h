@@ -55,7 +55,9 @@ void drawWiFiPortalScreen();
 // History
 void addToHistory(int deviceId, int alertIndex, int rssi);
 
-// Helper function
+// Helper functions
 char getAlertCode(int index);
+void initNTPTime();
+bool getFormattedTimeStr(char* buffer, size_t maxLen);
 
 #endif // DISPLAY_UI_H

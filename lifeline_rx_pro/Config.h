@@ -26,6 +26,13 @@
 #define WIFI_CONNECT_TIMEOUT 8000          // Connection timeout per network: 8 seconds (ms)
 #define MAX_WIFI_NETWORKS   3              // Up to 3 stored WiFi networks
 
+// NTP Time Configuration
+#define NTP_SERVER_1        "pool.ntp.org"
+#define NTP_SERVER_2        "asia.pool.ntp.org"
+#define NTP_SERVER_3        "time.nist.gov"
+#define GMT_OFFSET_SEC      (5.75 * 3600)  // GMT +5:45 (Nepal Standard Time)
+#define DAYLIGHT_OFFSET_SEC 0
+
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              PIN DEFINITIONS
 // ═══════════════════════════════════════════════════════════════════════════════════
@@ -47,10 +54,14 @@
 #define LCD_ROWS    2
 
 // LED Indicator Pins
-#define LED_WIFI    21      // WiFi connection status indicator (active HIGH when connected)
-#define LED_DATA    13      // Data receive blink indicator (active HIGH on packet RX)
+#define LED_WIFI    21      // WiFi connection status indicator
+#define LED_DATA    13      // Data receive blink indicator
 #define LED_GREEN   LED_WIFI
 #define LED_RED     LED_DATA
+
+// LED Wiring Polarity (Set to true if LED Cathode connects to GND, set to false if LED Anode connects to 3.3V)
+#define LED_WIFI_ACTIVE_HIGH  true
+#define LED_DATA_ACTIVE_HIGH  true
 
 // Audio Feedback
 #define BUZZER_PIN  12      // Buzzer

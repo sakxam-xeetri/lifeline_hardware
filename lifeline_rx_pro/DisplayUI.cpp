@@ -112,6 +112,27 @@ bool updateBootAnimation() {
     return elapsed >= BOOT_DISPLAY_TIME;
 }
 
+#include <time.h>
+#include <WiFi.h>
+
+extern bool wifiConnected;
+
+void initNTPTime() {
+    if (wifiConnected || WiFi.status() == WL_CONNECTED) {
+        configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
+        Serial.println(F("[NTP] Initialized time synchronization"));
+    }
+}
+
+bool getFormattedTimeStr(char* buffer, size_t maxLen) {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 10)) {
+        return false;
+    }
+    snprintf(buffer, maxLen, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    return true;
+}
+
 void drawNoWiFiScreen() {
     printLCDLine(0, " No Internet!   ");
     printLCDLine(1, "1x=Skip 3s=Setup");
@@ -120,14 +141,20 @@ void drawNoWiFiScreen() {
 }
 
 void drawIdleScreen() {
-    lcd.setCursor(0, 0);
-    lcd.print("LIFELINE RX  ");
-    lcd.write(0); // Radar symbol
-    lcd.print(" ");
+    if (WiFi.status() == WL_CONNECTED || wifiConnected) {
+        char timeBuf[12];
+        if (getFormattedTimeStr(timeBuf, sizeof(timeBuf))) {
+            char row0[17];
+            snprintf(row0, sizeof(row0), "Time: %-10s", timeBuf);
+            printLCDLine(0, row0);
+        } else {
+            printLCDLine(0, "Time: Syncing.. ");
+        }
+    } else {
+        printLCDLine(0, "Offline Mode    ");
+    }
     
-    char line1[17];
-    snprintf(line1, sizeof(line1), "433MHz  Alt:%-4d", totalAlertsReceived);
-    printLCDLine(1, line1);
+    printLCDLine(1, "Waiting for TX..");
     
     lastPulseTime = millis();
     pulseState = 0;
@@ -137,20 +164,31 @@ void drawIdleScreen() {
 void updateIdleAnimation() {
     unsigned long currentTime = millis();
     
-    if (currentTime - lastPulseTime >= IDLE_PULSE_INTERVAL) {
+    if (currentTime - lastPulseTime >= 500) {
         lastPulseTime = currentTime;
+        pulseState = (pulseState + 1) % 4;
         
-        lcd.setCursor(13, 0);
-        if (pulseState == 0) {
-            lcd.write(0); // Radar glyph
+        // Row 0: Time or Offline Mode
+        if (WiFi.status() == WL_CONNECTED || wifiConnected) {
+            char timeBuf[12];
+            if (getFormattedTimeStr(timeBuf, sizeof(timeBuf))) {
+                char row0[17];
+                snprintf(row0, sizeof(row0), "Time: %-10s", timeBuf);
+                printLCDLine(0, row0);
+            } else {
+                printLCDLine(0, "Time: Syncing.. ");
+            }
         } else {
-            lcd.print("o");
+            printLCDLine(0, "Offline Mode    ");
         }
-        pulseState = (pulseState + 1) % 2;
         
-        char line1[17];
-        snprintf(line1, sizeof(line1), "433MHz  Alt:%-4d", totalAlertsReceived);
-        printLCDLine(1, line1);
+        // Row 1: Waiting for TX data animated dots
+        switch (pulseState) {
+            case 0: printLCDLine(1, "Waiting for TX  "); break;
+            case 1: printLCDLine(1, "Waiting for TX. "); break;
+            case 2: printLCDLine(1, "Waiting for TX.."); break;
+            case 3: printLCDLine(1, "Waiting for TX..."); break;
+        }
     }
 }
 
