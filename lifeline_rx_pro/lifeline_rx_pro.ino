@@ -126,10 +126,9 @@ void loop() {
                                   deviceId, alertIndex, alertNames[alertIndex], rssi);
                     
                     triggerRxBlink();
-                    pushAlertToAPI(deviceId, alertIndex, rssi);
-                    
                     currentScreen = SCREEN_ALERT;
-                    drawAlertScreen(deviceId, alertIndex, rssi);
+                    drawAlertScreen(deviceId, alertIndex, rssi); // Instant LCD update & loud buzzer
+                    pushAlertToAPI(deviceId, alertIndex, rssi);  // Send API payload
                     Serial.println(F("[STATE] Switched to ALERT from NO_WIFI screen"));
                 }
             }
@@ -163,10 +162,9 @@ void loop() {
                                   deviceId, alertIndex, alertNames[alertIndex], rssi);
                     
                     triggerRxBlink();
-                    pushAlertToAPI(deviceId, alertIndex, rssi);
-                    
                     currentScreen = SCREEN_ALERT;
-                    drawAlertScreen(deviceId, alertIndex, rssi);
+                    drawAlertScreen(deviceId, alertIndex, rssi); // Instant LCD update & loud buzzer
+                    pushAlertToAPI(deviceId, alertIndex, rssi);  // Send API payload
                     
                     Serial.println(F("[STATE] Switched to ALERT"));
                 }
@@ -191,9 +189,8 @@ void loop() {
                                   deviceId, alertIndex);
                     
                     triggerRxBlink();
-                    pushAlertToAPI(deviceId, alertIndex, rssi);
-                    
-                    drawAlertScreen(deviceId, alertIndex, rssi);
+                    drawAlertScreen(deviceId, alertIndex, rssi); // Instantly interrupt & overwrite LCD display
+                    pushAlertToAPI(deviceId, alertIndex, rssi);  // Send API payload
                 }
             }
             

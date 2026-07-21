@@ -11,6 +11,7 @@ void pushAlertToAPI(int deviceId, int alertIndex, int rssi) {
     }
     
     HTTPClient http;
+    http.setTimeout(2500); // 2.5 second network timeout
     http.begin(API_ENDPOINT);
     http.addHeader("Content-Type", "application/json");
     

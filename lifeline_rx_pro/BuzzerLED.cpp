@@ -52,23 +52,12 @@ void playReturnIdleTone() {
 }
 
 void playAlertTone(int priority) {
-    switch (priority) {
-        case 0:  // Critical - 3x rapid beeps
-            tone(BUZZER_PIN, 2500, 100);
-            delay(220);
-            tone(BUZZER_PIN, 2500, 100);
-            delay(220);
-            tone(BUZZER_PIN, 2500, 100);
-            break;
-        case 1:  // High - 2x beeps
-            tone(BUZZER_PIN, 2200, 150);
-            delay(330);
-            tone(BUZZER_PIN, 2200, 150);
-            break;
-        default: // Medium / OK / Info - 1x single beep
-            tone(BUZZER_PIN, 2000, 200);
-            break;
-    }
+    // Loud, high-visibility 2500 Hz triple alarm beep sequence for all incoming emergency packets
+    tone(BUZZER_PIN, 2500, 120);
+    delay(180);
+    tone(BUZZER_PIN, 2500, 120);
+    delay(180);
+    tone(BUZZER_PIN, 2500, 140);
 }
 
 void triggerRxBlink() {
