@@ -28,7 +28,7 @@ void setup() {
     
     Serial.println(F("\n╔═══════════════════════════════════════════════════════════╗"));
     Serial.println(F("║      LIFELINE EMERGENCY RECEIVER v3.1 PRO                 ║"));
-    Serial.println(F("║     16x2 LCD & Multi-WiFi (GPIO 14 Btn + OTA)             ║"));
+    Serial.println(F("║     16x2 LCD & Multi-WiFi (WiFi Button + OTA Web)         ║"));
     Serial.println(F("╚═══════════════════════════════════════════════════════════╝\n"));
     
     // Initialize IOs
@@ -57,15 +57,6 @@ void setup() {
     
     initLoRa();
     
-    // WiFi startup
-    loadWiFiCredentials();
-    if (networkCount > 0) {
-        Serial.printf("[WIFI] Auto-connecting to %d stored network(s). Primary: %s\n", networkCount, activeSSID.c_str());
-        connectToWiFiSilent();
-    } else {
-        Serial.println(F("[WIFI] No credentials - Hold GPIO 14 button for 3 seconds to configure"));
-    }
-    
     Serial.println(F("=== Ready to receive emergency alerts ===\n"));
     
     #if SERIAL_DEBUG_ENABLED
@@ -86,10 +77,71 @@ void loop() {
         
         case SCREEN_BOOT:
             if (updateBootAnimation()) {
+                loadWiFiCredentials();
+                if (networkCount > 0) {
+                    Serial.printf("[WIFI] Auto-connecting to %d stored network(s). Primary: %s\n", networkCount, activeSSID.c_str());
+                    bool connected = connectToWiFi();
+                    if (connected) {
+                        currentScreen = SCREEN_IDLE;
+                        drawIdleScreen();
+                        Serial.println(F("[STATE] WiFi connected -> Switched to IDLE"));
+                    } else {
+                        currentScreen = SCREEN_NO_WIFI;
+                        drawNoWiFiScreen();
+                        Serial.println(F("[STATE] WiFi failed -> Switched to NO_WIFI screen"));
+                    }
+                } else {
+                    Serial.println(F("[WIFI] No stored credentials -> Switched to NO_WIFI screen"));
+                    playWiFiFailTone();
+                    currentScreen = SCREEN_NO_WIFI;
+                    drawNoWiFiScreen();
+                }
+            }
+            break;
+            
+        case SCREEN_NO_WIFI:
+            checkWiFiPortalButton();
+            
+            // Auto timeout 60 seconds -> switch to IDLE
+            if (millis() - noWiFiStartTime >= NO_WIFI_TIMEOUT) {
+                playReturnIdleTone();
                 currentScreen = SCREEN_IDLE;
                 drawIdleScreen();
-                Serial.println(F("[STATE] Switched to IDLE - Listening for alerts"));
+                Serial.println(F("[STATE] No WiFi screen timeout (60s) -> Switched to IDLE"));
             }
+            
+            // Check for incoming emergency alerts even when on No WiFi screen
+            {
+                int deviceId, alertIndex, rssi;
+                bool packetReceived = parseLoRaPacket(deviceId, alertIndex, rssi);
+                
+                #if SERIAL_DEBUG_ENABLED
+                if (!packetReceived) {
+                    packetReceived = checkSerialSimulatedPacket(deviceId, alertIndex, rssi);
+                }
+                #endif
+                
+                if (packetReceived) {
+                    Serial.printf("[RX] Alert received: Device=%d, Alert=%d (%s), RSSI=%d\n",
+                                  deviceId, alertIndex, alertNames[alertIndex], rssi);
+                    
+                    triggerRxBlink();
+                    pushAlertToAPI(deviceId, alertIndex, rssi);
+                    
+                    currentScreen = SCREEN_ALERT;
+                    drawAlertScreen(deviceId, alertIndex, rssi);
+                    Serial.println(F("[STATE] Switched to ALERT from NO_WIFI screen"));
+                }
+            }
+            break;
+            
+        case SCREEN_COUNTDOWN:
+            checkWiFiPortalButton();
+            break;
+            
+        case SCREEN_PORTAL:
+            checkWiFiPortalButton();
+            handleWiFiPortal();
             break;
             
         case SCREEN_IDLE:
@@ -146,12 +198,14 @@ void loop() {
             }
             
             if (shouldReturnToIdle()) {
+                playReturnIdleTone();
                 currentScreen = SCREEN_IDLE;
                 drawIdleScreen();
-                Serial.println(F("[STATE] Auto-returned to IDLE"));
+                Serial.println(F("[STATE] Auto-returned to IDLE from ALERT (15s timeout)"));
             }
             break;
             
+        case SCREEN_WIFI_SPLASH:
         case SCREEN_HISTORY:
         case SCREEN_SYSTEM_INFO:
             break;

@@ -106,10 +106,9 @@ bool connectToWiFiSilent() {
 
 bool connectToWiFi() {
     if (networkCount == 0) {
-        Serial.println(F("[WIFI] No credentials stored, launching open setup AP..."));
-        drawWiFiFailedScreen();
-        delay(1200);
-        startWiFiPortal();
+        Serial.println(F("[WIFI] No credentials stored"));
+        wifiConnected = false;
+        playWiFiFailTone();
         return false;
     }
     
@@ -135,19 +134,17 @@ bool connectToWiFi() {
             String ip = WiFi.localIP().toString();
             Serial.printf("[WIFI] Connected to %s! IP: %s\n", activeSSID.c_str(), ip.c_str());
             
+            currentScreen = SCREEN_WIFI_SPLASH;
             drawWiFiConnectedScreen(ip);
-            delay(2000);
+            playWiFiSuccessTone();
+            delay(WIFI_SPLASH_TIME);
             return true;
         }
     }
     
     wifiConnected = false;
-    Serial.println(F("[WIFI] All network connections failed - starting open setup portal"));
-    
-    drawWiFiFailedScreen();
-    delay(1500);
-    
-    startWiFiPortal();
+    Serial.println(F("[WIFI] All network connections failed"));
+    playWiFiFailTone();
     return false;
 }
 
@@ -172,6 +169,7 @@ void startWiFiPortal() {
     
     portalActive = true;
     portalStartTime = millis();
+    currentScreen = SCREEN_PORTAL;
     
     drawWiFiPortalScreen();
 }
@@ -202,54 +200,63 @@ void checkWiFiPortalButton() {
             buttonPressed = true;
             buttonPressStartTime = millis();
             lastBeepSecond = -1;
+            previousScreenBeforePress = currentScreen;
         } else {
             unsigned long pressDuration = millis() - buttonPressStartTime;
             int secondsHeld = pressDuration / 1000;
-            int remainingSec = 3 - secondsHeld;
-            if (remainingSec < 1) remainingSec = 1;
             
-            if (secondsHeld != lastBeepSecond && remainingSec >= 1 && remainingSec <= 3) {
+            if (secondsHeld != lastBeepSecond && secondsHeld >= 1 && secondsHeld <= 3) {
                 lastBeepSecond = secondsHeld;
-                tone(BUZZER_PIN, 1800, 60);
+                playCountdownTickTone();
             }
             
-            if (!portalActive && pressDuration > 100) {
-                drawCountdownScreen(remainingSec);
+            if (!portalActive && pressDuration >= 150) {
+                currentScreen = SCREEN_COUNTDOWN;
+                drawProgressCountdownScreen(pressDuration, LONG_PRESS_DURATION);
             }
             
             if (pressDuration >= LONG_PRESS_DURATION) {
                 buttonPressed = false;
-                tone(BUZZER_PIN, 2400, 200);
                 
                 if (portalActive) {
                     stopWiFiPortal();
                 } else {
-                    if (networkCount > 0) {
-                        connectToWiFi();
-                    } else {
-                        startWiFiPortal();
-                    }
-                }
-                
-                if (!portalActive) {
-                    if (currentScreen == SCREEN_IDLE) {
-                        drawIdleScreen();
-                    } else if (currentScreen == SCREEN_ALERT) {
-                        drawAlertScreen(lastDeviceId, lastAlertIndex, lastRssi);
-                    }
+                    playPortalOpenTone();
+                    startWiFiPortal();
                 }
             }
         }
     } else {
         if (buttonPressed) {
             buttonPressed = false;
+            unsigned long totalDuration = millis() - buttonPressStartTime;
             lastBeepSecond = -1;
             
-            if (!portalActive && (millis() - buttonPressStartTime) > 200) {
-                if (currentScreen == SCREEN_IDLE) {
-                    drawIdleScreen();
-                } else if (currentScreen == SCREEN_ALERT) {
-                    drawAlertScreen(lastDeviceId, lastAlertIndex, lastRssi);
+            if (!portalActive) {
+                if (totalDuration < 1000) {
+                    // Short press
+                    if (previousScreenBeforePress == SCREEN_NO_WIFI) {
+                        // Skip No WiFi screen
+                        playSkipConfirmTone();
+                        currentScreen = SCREEN_IDLE;
+                        drawIdleScreen();
+                    } else if (previousScreenBeforePress == SCREEN_IDLE) {
+                        currentScreen = SCREEN_IDLE;
+                        drawIdleScreen();
+                    } else if (previousScreenBeforePress == SCREEN_ALERT) {
+                        currentScreen = SCREEN_ALERT;
+                        drawAlertScreen(lastDeviceId, lastAlertIndex, lastRssi);
+                    }
+                } else {
+                    // Pressed between 1s and 3s, released before 3s -> cancel countdown
+                    currentScreen = previousScreenBeforePress;
+                    if (currentScreen == SCREEN_NO_WIFI) {
+                        drawNoWiFiScreen();
+                    } else if (currentScreen == SCREEN_IDLE) {
+                        drawIdleScreen();
+                    } else if (currentScreen == SCREEN_ALERT) {
+                        drawAlertScreen(lastDeviceId, lastAlertIndex, lastRssi);
+                    }
                 }
             }
         }

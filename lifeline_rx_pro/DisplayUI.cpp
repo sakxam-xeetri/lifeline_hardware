@@ -7,7 +7,9 @@ LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 
 // Define Global State Variables
 ScreenState currentScreen = SCREEN_BOOT;
+ScreenState previousScreenBeforePress = SCREEN_IDLE;
 unsigned long bootStartTime = 0;
+unsigned long noWiFiStartTime = 0;
 unsigned long alertReceivedTime = 0;
 unsigned long lastPulseTime = 0;
 uint8_t pulseState = 0;
@@ -27,12 +29,12 @@ void initDisplay() {
     lcd.init();
     lcd.backlight();
     
-    // Register custom glyphs
-    lcd.createChar(0, (uint8_t*)glyphRadar);
-    lcd.createChar(1, (uint8_t*)glyphBell);
-    lcd.createChar(2, (uint8_t*)glyphCheck);
-    lcd.createChar(3, (uint8_t*)glyphSignal);
-    lcd.createChar(4, (uint8_t*)glyphWarn);
+    // Register custom glyphs (0 to 4)
+    lcd.createChar(0, (uint8_t*)glyphRadar);  // CGRAM 0: Radar
+    lcd.createChar(1, (uint8_t*)glyphBell);   // CGRAM 1: Bell
+    lcd.createChar(2, (uint8_t*)glyphCheck);  // CGRAM 2: Checkmark
+    lcd.createChar(3, (uint8_t*)glyphSignal); // CGRAM 3: Signal bars
+    lcd.createChar(4, (uint8_t*)glyphWarn);   // CGRAM 4: Warning
     
     Serial.printf("[OK] 16x2 I2C LCD initialized (SDA: GPIO %d, SCL: GPIO %d, Addr: 0x%02X)\n", 
                   LCD_SDA, LCD_SCL, LCD_ADDR);
@@ -87,8 +89,8 @@ void addToHistory(int deviceId, int alertIndex, int rssi) {
 
 void drawBootScreen() {
     lcd.clear();
-    printLCDCenter(0, "LIFELINE RX v3.1");
-    printLCDCenter(1, "Init LoRa...");
+    printLCDCenter(0, "LIFELINE RX");
+    printLCDCenter(1, "Booting...");
     bootStartTime = millis();
     bootDotState = 0;
     Serial.println(F("[SCREEN] Boot screen displayed on 16x2 LCD"));
@@ -100,14 +102,21 @@ bool updateBootAnimation() {
     
     if (newDotState != bootDotState) {
         bootDotState = newDotState;
-        String status = "Ready";
+        String status = "   Booting";
         for (int i = 0; i < bootDotState; i++) {
             status += ".";
         }
-        printLCDCenter(1, status);
+        printLCDLine(1, status);
     }
     
     return elapsed >= BOOT_DISPLAY_TIME;
+}
+
+void drawNoWiFiScreen() {
+    printLCDLine(0, " No Internet!   ");
+    printLCDLine(1, "1x=Skip 3s=Setup");
+    noWiFiStartTime = millis();
+    Serial.println(F("[SCREEN] Displayed No Internet screen"));
 }
 
 void drawIdleScreen() {
@@ -131,7 +140,7 @@ void updateIdleAnimation() {
     if (currentTime - lastPulseTime >= IDLE_PULSE_INTERVAL) {
         lastPulseTime = currentTime;
         
-        lcd.setCursor(14, 0);
+        lcd.setCursor(13, 0);
         if (pulseState == 0) {
             lcd.write(0); // Radar glyph
         } else {
@@ -150,17 +159,19 @@ void drawAlertScreen(int deviceId, int alertIndex, int rssi) {
     char code = getAlertCode(alertIndex);
     const char* nameShort = alertNamesShort[alertIndex];
     
+    // Row 0: [!] A EMERGENCY
     lcd.setCursor(0, 0);
-    lcd.write(4); // Warning icon glyph
+    lcd.write(4); // Warning icon glyph (CGRAM 4)
     
     char row0[17];
-    snprintf(row0, sizeof(row0), "%c %-13s", code, nameShort);
+    snprintf(row0, sizeof(row0), " %c %-12s", code, nameShort);
     lcd.print(row0);
     
-    const char* priLabel = (priority == 0) ? "CRIT" : (priority == 1) ? "HIGH" : (priority == 2) ? "MED " : "OK  ";
+    // Row 1: TX#001 -65dBm CR
+    const char* priCode = (priority < 5) ? priorityLabelsShort[priority] : "IN";
     
     char row1[17];
-    snprintf(row1, sizeof(row1), "TX#%03d %d%s %s", deviceId % 1000, rssi, "dBm", priLabel);
+    snprintf(row1, sizeof(row1), "TX#%03d %4ddBm %s", deviceId % 1000, rssi, priCode);
     printLCDLine(1, row1);
     
     lastDeviceId = deviceId;
@@ -194,18 +205,34 @@ void drawWiFiConnectedScreen(const String& ip) {
 }
 
 void drawWiFiFailedScreen() {
-    printLCDLine(0, "WiFi Failed!");
+    printLCDLine(0, "WiFi Failed!    ");
     printLCDLine(1, "Open Setup AP..");
 }
 
 void drawCountdownScreen(int remainingSec) {
-    printLCDLine(0, "GPIO14 Btn Held ");
+    printLCDLine(0, "WiFi Btn Held   ");
     char line1[17];
     snprintf(line1, sizeof(line1), "Opening in %ds...", remainingSec);
     printLCDLine(1, line1);
 }
 
+void drawProgressCountdownScreen(unsigned long elapsedMs, unsigned long totalMs) {
+    printLCDLine(0, "WiFi Btn Held   ");
+    
+    uint8_t filled = (elapsedMs * 16) / totalMs;
+    if (filled > 16) filled = 16;
+    
+    char bar[17];
+    for (uint8_t i = 0; i < 16; i++) {
+        bar[i] = (i < filled) ? (char)0xFF : ' ';
+    }
+    bar[16] = '\0';
+    
+    lcd.setCursor(0, 1);
+    lcd.print(bar);
+}
+
 void drawWiFiPortalScreen() {
-    printLCDLine(0, "AP:LifeLine-RX");
-    printLCDLine(1, "Connect:192.168.4.1");
+    printLCDLine(0, "AP:LifeLine-RX  ");
+    printLCDLine(1, "192.168.4.1     ");
 }

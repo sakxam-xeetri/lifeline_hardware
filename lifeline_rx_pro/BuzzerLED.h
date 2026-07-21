@@ -6,8 +6,14 @@
 // Initialize Pins for buzzer and LEDs
 void initBuzzerLED();
 
-// Alarm feedback tones
+// Alarm & UI feedback tones
 void playBootTone();
+void playWiFiSuccessTone();
+void playWiFiFailTone();
+void playCountdownTickTone();
+void playPortalOpenTone();
+void playSkipConfirmTone();
+void playReturnIdleTone();
 void playAlertTone(int priority);
 
 // Status/Data LED indicators

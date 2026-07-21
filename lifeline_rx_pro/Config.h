@@ -61,11 +61,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              TIMING CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════════
-#define BOOT_DISPLAY_TIME       1000    // Boot screen duration (ms)
-#define ALERT_DISPLAY_TIME      30000   // Alert display time before auto-return (ms)
+#define BOOT_DISPLAY_TIME       2000    // Boot screen duration (ms) - ~2 seconds
+#define ALERT_DISPLAY_TIME      15000   // Alert display time before auto-return (ms) - 15 seconds
+#define NO_WIFI_TIMEOUT         60000   // Timeout on No WiFi screen (ms) - 60 seconds
+#define WIFI_SPLASH_TIME        1500    // Duration of WiFi connected splash screen (ms)
 #define IDLE_PULSE_INTERVAL     600     // Pulse animation interval (ms)
 #define HISTORY_MAX_ITEMS       10      // Maximum alerts in history
-#define LONG_PRESS_DURATION     3000    // 3 seconds hold required on GPIO 14 button
+#define LONG_PRESS_DURATION     3000    // 3 seconds hold required on WiFi button
 #define RX_BLINK_DURATION_MS    250     // LED ON time in milliseconds when data packet is received
 
 // ═══════════════════════════════════════════════════════════════════════════════════
@@ -126,6 +128,7 @@ const uint8_t alertPriority[ALERT_COUNT] = {
 };
 
 const char* const priorityLabels[] = {"CRIT", "HIGH", "MED ", "OK  ", "INFO"};
+const char* const priorityLabelsShort[] = {"CR", "HI", "ME", "OK", "IN"};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              DATA STRUCTURES & STATE ENUMS
@@ -143,11 +146,15 @@ struct AlertRecord {
 };
 
 enum ScreenState {
-    SCREEN_BOOT,            // 0 - Boot screen
-    SCREEN_IDLE,            // 1 - Listening state
-    SCREEN_ALERT,           // 2 - Alert display
-    SCREEN_HISTORY,         // 3 - History
-    SCREEN_SYSTEM_INFO      // 4 - System info
+    SCREEN_BOOT,            // 0 - Boot screen (~2s animation)
+    SCREEN_WIFI_SPLASH,     // 1 - WiFi connected splash screen (~1.5s)
+    SCREEN_NO_WIFI,         // 2 - No WiFi internet prompt screen
+    SCREEN_COUNTDOWN,       // 3 - WiFi button hold progress bar countdown
+    SCREEN_PORTAL,          // 4 - WiFi setup AP portal active screen
+    SCREEN_IDLE,            // 5 - Listening / home screen
+    SCREEN_ALERT,           // 6 - Alert display screen (15s timeout)
+    SCREEN_HISTORY,         // 7 - History
+    SCREEN_SYSTEM_INFO      // 8 - System info
 };
 
 #define SERIAL_DEBUG_ENABLED true

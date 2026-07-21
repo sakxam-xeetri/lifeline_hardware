@@ -9,7 +9,9 @@ extern LiquidCrystal_I2C lcd;
 
 // Global State Variables (declared extern, defined in DisplayUI.cpp or .ino)
 extern ScreenState currentScreen;
+extern ScreenState previousScreenBeforePress;
 extern unsigned long bootStartTime;
+extern unsigned long noWiFiStartTime;
 extern unsigned long alertReceivedTime;
 extern unsigned long lastPulseTime;
 extern uint8_t pulseState;
@@ -42,10 +44,12 @@ void drawAlertScreen(int deviceId, int alertIndex, int rssi);
 bool shouldReturnToIdle();
 
 // WiFi Screens
+void drawNoWiFiScreen();
 void drawWiFiConnectingScreen(const String& ssid, int currentIdx, int totalCount);
 void drawWiFiConnectedScreen(const String& ip);
 void drawWiFiFailedScreen();
 void drawCountdownScreen(int remainingSec);
+void drawProgressCountdownScreen(unsigned long elapsedMs, unsigned long totalMs);
 void drawWiFiPortalScreen();
 
 // History
