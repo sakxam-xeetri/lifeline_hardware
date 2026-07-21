@@ -84,4 +84,8 @@
  C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/Uri.h \
  C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/middleware/Middleware.h \
  C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/detail/RequestHandler.h \
- C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h
+ C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
+ C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/libraries/Update/src/Update.h \
+ C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/cores/esp32/MD5Builder.h \
+ C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/cores/esp32/HashBuilder.h \
+ C:/Users/ACER/.platformio/packages/framework-arduinoespressif32/cores/esp32/HEXBuilder.h
