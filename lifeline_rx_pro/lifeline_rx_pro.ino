@@ -3,6 +3,7 @@
  *                        ╔═════════════════════════════════════╗
  *                        ║    LIFELINE EMERGENCY RECEIVER      ║
  *                        ║   Professional Base Station v3.1    ║
+ *                        ║         (16x2 I2C LCD Edition)      ║
  *                        ╚═════════════════════════════════════╝
  * ═══════════════════════════════════════════════════════════════════════════════════
  * 
@@ -11,16 +12,15 @@
  * monitoring emergency alerts from field transmitters.
  * 
  * DESIGN PRINCIPLES:
- *   ✓ Clarity under stress - Large fonts, high contrast, clear icons
- *   ✓ High visibility alerts - Color-coded priority, glowing indicators
- *   ✓ Outdoor readability - Dark theme, no glare, industrial colors
- *   ✓ Rugged base station appearance - Government-grade emergency equipment look
+ *   ✓ Compact & High Readability - 16x2 Character LCD with custom glyphs
+ *   ✓ High visibility alerts - Clear priority codes and text indicators
+ *   ✓ Rugged base station appearance - Reliable government-grade emergency receiver
  * 
  * HARDWARE SPECIFICATION:
  *   - Microcontroller: ESP32 Development Board
- *   - Display: 2.8" TFT SPI (Auto-adaptive: 320×240 or 320×480)
+ *   - Display: 16x2 Character LCD with I2C Module (SDA: GPIO 4, SCL: GPIO 16)
  *   - Communication: LoRa SX1278 @ 433 MHz
- *   - Indicators: Buzzer for alert notifications
+ *   - Indicators: Buzzer & Status LEDs for alert notifications
  * 
  * PACKET FORMAT: TX[ID],[ALERT_CODE] (e.g., "TX003,A")
  * 
@@ -30,10 +30,9 @@
  * ═══════════════════════════════════════════════════════════════════════════════════
  */
 
-#include <SPI.h>
+#include <Wire.h>
 #include <LoRa.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7789.h>
+#include <LiquidCrystal_I2C.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WebServer.h>
@@ -81,14 +80,14 @@
 #define SPI_MISO    17      // Master In Slave Out
 #define SPI_MOSI    27      // Master Out Slave In
 
-// TFT Display Pins (ST7789) - Shares SPI bus with LoRa
-// TFT uses same MOSI/MISO/SCK as LoRa, only CS is different
-#define TFT_CS      16      // Chip Select (unique for TFT)
-#define TFT_DC      4       // Data/Command
-#define TFT_RST     2       // Reset
-// TFT shares SPI bus: MOSI=GPIO27, MISO=GPIO17, SCK=GPIO5
+// 16x2 LCD Display Pins (I2C) - Reused from former TFT pins
+#define LCD_SDA     4       // I2C Data (reused from TFT_DC)
+#define LCD_SCL     16      // I2C Clock (reused from TFT_CS)
+#define LCD_ADDR    0x27    // Default I2C Address for 1602 LCD (PCF8574)
+#define LCD_COLS    16
+#define LCD_ROWS    2
 
-// LED Indicator Pins (optional)
+// LED Indicator Pins
 #define LED_GREEN   21      // Success indicator (active HIGH)
 #define LED_RED     13      // Alert indicator (active HIGH)
 
@@ -99,169 +98,68 @@
 #define WIFI_PORTAL_PIN  0  // EN/BOOT button (GPIO 0) - Press to open WiFi portal
 
 // ═══════════════════════════════════════════════════════════════════════════════════
-//                          DISPLAY AUTO-ADAPTIVE CONFIGURATION
+//                              LCD CUSTOM CHARACTERS (CGRAM 0-7)
 // ═══════════════════════════════════════════════════════════════════════════════════
 
-// Physical display dimensions (will be auto-detected or set manually)
-#define DISPLAY_240x320   1    // Standard 2.4" / 2.8" TFT
-#define DISPLAY_320x480   2    // Larger 3.5" TFT
+// Glyph 0: Radar/Antenna Icon
+const uint8_t glyphRadar[8] = {
+    0b00000,
+    0b01110,
+    0b10001,
+    0b00100,
+    0b01010,
+    0b00000,
+    0b00100,
+    0b00000
+};
 
-// Set your display type here (or implement auto-detection)
-#define DISPLAY_TYPE  DISPLAY_240x320
+// Glyph 1: Alert Bell Icon
+const uint8_t glyphBell[8] = {
+    0b00100,
+    0b01110,
+    0b01110,
+    0b01110,
+    0b11111,
+    0b00000,
+    0b00100,
+    0b00000
+};
 
-#if DISPLAY_TYPE == DISPLAY_240x320
-    #define NATIVE_WIDTH    240
-    #define NATIVE_HEIGHT   320
-#else
-    #define NATIVE_WIDTH    320
-    #define NATIVE_HEIGHT   480
-#endif
+// Glyph 2: Checkmark Icon
+const uint8_t glyphCheck[8] = {
+    0b00000,
+    0b00001,
+    0b00011,
+    0b10110,
+    0b11100,
+    0b01000,
+    0b00000,
+    0b00000
+};
 
-// Landscape orientation (swaps width/height)
-#define SCREEN_ROTATION     1   // 0=Portrait, 1=Landscape, 2=Portrait inverted, 3=Landscape inverted
+// Glyph 3: Signal RSSI Icon
+const uint8_t glyphSignal[8] = {
+    0b00001,
+    0b00001,
+    0b00101,
+    0b00101,
+    0b10101,
+    0b10101,
+    0b00000,
+    0b00000
+};
 
-// Computed screen dimensions after rotation
-#if (SCREEN_ROTATION == 1 || SCREEN_ROTATION == 3)
-    #define SCREEN_WIDTH    NATIVE_HEIGHT
-    #define SCREEN_HEIGHT   NATIVE_WIDTH
-#else
-    #define SCREEN_WIDTH    NATIVE_WIDTH
-    #define SCREEN_HEIGHT   NATIVE_HEIGHT
-#endif
-
-// ═══════════════════════════════════════════════════════════════════════════════════
-//                              UI LAYOUT CONSTANTS
-// ═══════════════════════════════════════════════════════════════════════════════════
-
-// Fixed layout dimensions (consistent across all screens)
-#define HEADER_HEIGHT       42                         // Fixed header height (taller for premium look)
-#define FOOTER_HEIGHT       32                         // Fixed footer height
-#define CONTENT_START_Y     (HEADER_HEIGHT + 4)        // Content area start (after accent line)
-#define CONTENT_HEIGHT      (SCREEN_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT - 6)
-#define MARGIN              10                         // Universal margin (slightly larger)
-#define MARGIN_SMALL        5                          // Small margin
-#define BORDER_RADIUS       6                          // Rounded corner radius (more rounded)
-
-// Text sizes (Adafruit GFX scale factors)
-#define TEXT_XLARGE         4   // Extra large (boot logo) - 24px equiv
-#define TEXT_LARGE          3   // Large headings - 18px equiv
-#define TEXT_MEDIUM         2   // Standard text - 12px equiv
-#define TEXT_SMALL          1   // Small text / labels - 6px equiv
-
-// Premium UI Effects
-#define GLOW_INTENSITY      3   // Glow effect layers
-#define SHADOW_OFFSET       2   // Card shadow offset
-#define GRADIENT_STEPS      8   // Steps for gradient simulation
-
-// ═══════════════════════════════════════════════════════════════════════════════════
-//                    PREMIUM PROFESSIONAL COLOR PALETTE
-// ═══════════════════════════════════════════════════════════════════════════════════
-// Ultra-modern dark theme with vibrant accents - inspired by high-end emergency systems
-// ❌ NO WHITE OR LIGHT BACKGROUNDS - Premium dark aesthetic
-// RGB888 to RGB565 conversion macro
-
-#define RGB565(r, g, b) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3))
-
-// ─────────────────────────────── PRIMARY BACKGROUNDS ───────────────────────────────
-
-// Ultra Deep Black - #0D0D0F (Primary background - Rich black)
-#define COLOR_BG_PRIMARY        RGB565(13, 13, 15)
-
-// Deep Navy Slate - #0a1929 (Headers/footers - Premium depth)
-#define COLOR_BG_HEADER         RGB565(10, 25, 41)
-
-// Midnight Blue - #071318 (Alternative header - Subtle variation)
-#define COLOR_BG_HEADER_ALT     RGB565(7, 19, 24)
-
-// Elevated Card - #1a1a2e (Cards with slight purple tint)
-#define COLOR_BG_CARD           RGB565(26, 26, 46)
-
-// Card Hover/Active - #252542
-#define COLOR_BG_CARD_ACTIVE    RGB565(37, 37, 66)
-
-// Input/Selection background - #2d2d44
-#define COLOR_BG_INPUT          RGB565(45, 45, 68)
-
-// Glass effect overlay simulation
-#define COLOR_GLASS_LIGHT       RGB565(255, 255, 255)
-#define COLOR_GLASS_DARK        RGB565(20, 20, 30)
-
-// ─────────────────────────────── VIBRANT PRIMARY COLORS ────────────────────────────
-
-// Electric Red - #ff3b3b (Critical/Emergency/Error - More vibrant)
-#define COLOR_RED               RGB565(255, 59, 59)
-#define COLOR_RED_DARK          RGB565(180, 30, 30)
-#define COLOR_RED_BRIGHT        RGB565(255, 100, 100)
-#define COLOR_RED_GLOW          RGB565(255, 80, 80)
-
-// Neon Green - #00ff87 (Success - Electric feel)
-#define COLOR_GREEN             RGB565(0, 255, 135)
-#define COLOR_GREEN_DARK        RGB565(0, 180, 95)
-#define COLOR_GREEN_BRIGHT      RGB565(50, 255, 160)
-#define COLOR_GREEN_GLOW        RGB565(30, 255, 145)
-
-// Electric Amber - #ffb800 (Selection/Warning - Rich gold)
-#define COLOR_AMBER             RGB565(255, 184, 0)
-#define COLOR_AMBER_DARK        RGB565(200, 140, 0)
-#define COLOR_AMBER_BRIGHT      RGB565(255, 210, 50)
-#define COLOR_AMBER_GLOW        RGB565(255, 195, 30)
-
-// Cyan Electric - #00d4ff (Accent/Links - Vibrant cyan)
-#define COLOR_CYAN              RGB565(0, 212, 255)
-#define COLOR_CYAN_DARK         RGB565(0, 150, 200)
-#define COLOR_CYAN_BRIGHT       RGB565(80, 230, 255)
-#define COLOR_CYAN_GLOW         RGB565(40, 220, 255)
-
-// Vivid Orange - #ff7b00 (High Priority - Punchy)
-#define COLOR_ORANGE            RGB565(255, 123, 0)
-#define COLOR_ORANGE_DARK       RGB565(200, 90, 0)
-#define COLOR_ORANGE_BRIGHT     RGB565(255, 150, 50)
-
-// Electric Purple - #a855f7 (Premium accent)
-#define COLOR_PURPLE            RGB565(168, 85, 247)
-#define COLOR_PURPLE_DARK       RGB565(120, 60, 180)
-
-// ─────────────────────────────── TEXT COLORS ───────────────────────────────────────
-
-// Primary Text - Pure White - #ffffff (Maximum contrast)
-#define COLOR_TEXT_PRIMARY      RGB565(255, 255, 255)
-
-// Secondary Text - Cool Gray - #a3b1c6
-#define COLOR_TEXT_SECONDARY    RGB565(163, 177, 198)
-
-// Muted Text - Blue Gray - #64748b
-#define COLOR_TEXT_MUTED        RGB565(100, 116, 139)
-
-// Dark Text (on light backgrounds) - #0a0a0a
-#define COLOR_TEXT_DARK         RGB565(10, 10, 10)
-
-// Disabled Text - Dark gray
-#define COLOR_TEXT_DISABLED     RGB565(60, 70, 85)
-
-// ─────────────────────────────── ACCENT & UTILITY ──────────────────────────────────
-
-// Premium accent line color (subtle gradient effect)
-#define COLOR_ACCENT_LINE       RGB565(40, 50, 70)
-#define COLOR_ACCENT_BRIGHT     RGB565(60, 80, 120)
-
-// Border colors - subtle but defined
-#define COLOR_BORDER            RGB565(50, 60, 85)
-#define COLOR_BORDER_FOCUS      COLOR_CYAN
-#define COLOR_BORDER_SUCCESS    COLOR_GREEN
-#define COLOR_BORDER_ERROR      COLOR_RED
-
-// Status indicators with glow potential
-#define COLOR_STATUS_CRITICAL   COLOR_RED
-#define COLOR_STATUS_HIGH       COLOR_ORANGE
-#define COLOR_STATUS_MEDIUM     COLOR_AMBER
-#define COLOR_STATUS_LOW        COLOR_GREEN
-#define COLOR_STATUS_NEUTRAL    COLOR_TEXT_SECONDARY
-
-// Badge/Pill colors
-#define COLOR_BADGE_BG          RGB565(45, 45, 75)
-
-// Live indicator
-#define COLOR_LIVE_DOT          COLOR_GREEN
+// Glyph 4: Warning Triangle Icon
+const uint8_t glyphWarn[8] = {
+    0b00100,
+    0b01110,
+    0b11111,
+    0b11011,
+    0b11011,
+    0b11111,
+    0b00100,
+    0b00000
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              ALERT DEFINITIONS
@@ -288,7 +186,7 @@ const char* alertNames[ALERT_COUNT] = {
     "OTHER EMERGENCY"       // 14 - O - NEUTRAL
 };
 
-// Shorter names for compact display
+// Shorter names optimized for 16x2 LCD display (max 13 chars)
 const char* alertNamesShort[ALERT_COUNT] = {
     "EMERGENCY",
     "MEDICAL EMERG",
@@ -312,8 +210,8 @@ const uint8_t alertPriority[ALERT_COUNT] = {
     0, 0, 2, 0, 3, 1, 2, 2, 2, 1, 1, 1, 1, 2, 4
 };
 
-// Priority label text
-const char* priorityLabels[] = {"CRITICAL", "HIGH", "MEDIUM", "OK", "INFO"};
+// Priority label text for LCD
+const char* priorityLabels[] = {"CRIT", "HIGH", "MED ", "OK  ", "INFO"};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              TIMING CONSTANTS
@@ -328,23 +226,21 @@ const char* priorityLabels[] = {"CRITICAL", "HIGH", "MEDIUM", "OK", "INFO"};
 //                              GLOBAL OBJECTS
 // ═══════════════════════════════════════════════════════════════════════════════════
 
-// TFT Display (Hardware SPI - shared with LoRa module)
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+// 16x2 LCD Object Instance (I2C)
+LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              STATE MANAGEMENT
 // ═══════════════════════════════════════════════════════════════════════════════════
 
-// Screen state enumeration
 enum ScreenState {
-    SCREEN_BOOT,            // 0 - Initial boot/splash screen
+    SCREEN_BOOT,            // 0 - Initial boot screen
     SCREEN_IDLE,            // 1 - Waiting for signals
     SCREEN_ALERT,           // 2 - Alert display
     SCREEN_HISTORY,         // 3 - Alert history view
     SCREEN_SYSTEM_INFO      // 4 - System information display
 };
 
-// Current application state
 ScreenState currentScreen = SCREEN_BOOT;
 
 // Timing variables
@@ -379,11 +275,9 @@ int totalAlertsReceived = 0;
 //                              WIFI STATE MANAGEMENT
 // ═══════════════════════════════════════════════════════════════════════════════════
 
-// WiFi objects
 WebServer wifiServer(80);
 Preferences preferences;
 
-// WiFi state variables
 bool wifiConnected = false;
 bool portalActive = false;
 unsigned long portalStartTime = 0;
@@ -391,9 +285,14 @@ unsigned long buttonPressStartTime = 0;
 bool buttonPressed = false;
 #define LONG_PRESS_DURATION 3000  // 3 seconds for long press
 
-// Stored WiFi credentials
 String storedSSID = "";
 String storedPassword = "";
+
+// Forward declarations
+void drawWiFiPortalScreen();
+void startWiFiPortal();
+void stopWiFiPortal();
+void printSerialDebugMenu();
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                          SERIAL DEBUG CONFIGURATION
@@ -404,10 +303,6 @@ String storedPassword = "";
 
 String serialInputBuffer = "";
 
-/**
- * Check for Serial input to simulate received alerts
- * Format: "DEVICE_ID,ALERT_CODE" (e.g., "3,A" or "3,5")
- */
 bool checkSerialSimulatedPacket(int& deviceId, int& alertIndex, int& rssi) {
     if (!Serial.available()) return false;
     
@@ -428,13 +323,11 @@ bool checkSerialSimulatedPacket(int& deviceId, int& alertIndex, int& rssi) {
     
     if (input.length() == 0) return false;
     
-    // Help command
     if (input == "h" || input == "H" || input == "help" || input == "?") {
         printSerialDebugMenu();
         return false;
     }
     
-    // Quick single-digit command (1-9, 0)
     if (input.length() == 1 && ((input[0] >= '0' && input[0] <= '9'))) {
         deviceId = 1;
         alertIndex = (input[0] == '0') ? 9 : input[0] - '1';
@@ -444,7 +337,6 @@ bool checkSerialSimulatedPacket(int& deviceId, int& alertIndex, int& rssi) {
         return true;
     }
     
-    // Single letter alert code (A-O)
     if (input.length() == 1 && ((input[0] >= 'A' && input[0] <= 'O') || (input[0] >= 'a' && input[0] <= 'o'))) {
         deviceId = 1;
         char code = (input[0] >= 'a') ? (input[0] - 'a' + 'A') : input[0];
@@ -455,7 +347,6 @@ bool checkSerialSimulatedPacket(int& deviceId, int& alertIndex, int& rssi) {
         return true;
     }
     
-    // Parse full format: DEVICE_ID,ALERT_CODE
     int comma = input.indexOf(',');
     if (comma <= 0) {
         Serial.println("[SERIAL DEBUG] Invalid format. Use: DEVICE_ID,ALERT_CODE (e.g., '3,A')");
@@ -486,9 +377,6 @@ bool checkSerialSimulatedPacket(int& deviceId, int& alertIndex, int& rssi) {
     return true;
 }
 
-/**
- * Print debug menu for Serial Monitor
- */
 void printSerialDebugMenu() {
     Serial.println(F("\n╔════════════════════════════════════════════════════════════╗"));
     Serial.println(F("║       LIFELINE RECEIVER v3.1 PRO - Serial Debug            ║"));
@@ -511,33 +399,9 @@ void printSerialDebugMenu() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════
-//                              UTILITY FUNCTIONS
+//                              UTILITY FUNCTIONS & LCD HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════════
 
-/**
- * Get color based on alert priority level
- */
-uint16_t getPriorityColor(uint8_t priority) {
-    switch (priority) {
-        case 0:  return COLOR_STATUS_CRITICAL;
-        case 1:  return COLOR_STATUS_HIGH;
-        case 2:  return COLOR_STATUS_MEDIUM;
-        case 3:  return COLOR_STATUS_LOW;
-        default: return COLOR_STATUS_NEUTRAL;
-    }
-}
-
-/**
- * Get color for specific alert by index
- */
-uint16_t getAlertColor(int index) {
-    if (index < 0 || index >= ALERT_COUNT) return COLOR_STATUS_NEUTRAL;
-    return getPriorityColor(alertPriority[index]);
-}
-
-/**
- * Get alert code character (A-O)
- */
 char getAlertCode(int index) {
     if (index >= 0 && index < ALERT_COUNT) {
         return 'A' + index;
@@ -546,199 +410,33 @@ char getAlertCode(int index) {
 }
 
 /**
- * Calculate RSSI bar segments (0-10)
+ * Print line padded to exactly 16 characters on LCD row to avoid flicker
  */
-int getRssiBarLevel(int rssi) {
-    if (rssi >= -50) return 10;
-    if (rssi <= -110) return 1;
-    return map(rssi, -110, -50, 1, 10);
-}
-
-/**
- * Draw text centered horizontally
- */
-void drawCenteredText(const char* text, int y, uint8_t textSize, uint16_t color) {
-    tft.setTextSize(textSize);
-    tft.setTextColor(color);
-    int16_t x1, y1;
-    uint16_t w, h;
-    tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-    tft.setCursor((SCREEN_WIDTH - w) / 2, y);
-    tft.print(text);
-}
-
-/**
- * Draw text right-aligned
- */
-void drawRightText(const char* text, int y, uint8_t textSize, uint16_t color) {
-    tft.setTextSize(textSize);
-    tft.setTextColor(color);
-    int16_t x1, y1;
-    uint16_t w, h;
-    tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-    tft.setCursor(SCREEN_WIDTH - w - MARGIN, y);
-    tft.print(text);
-}
-
-/**
- * Draw horizontal gradient effect (simulated with lines)
- */
-void drawGradientH(int x, int y, int w, int h, uint16_t colorStart, uint16_t colorEnd) {
-    for (int i = 0; i < w; i++) {
-        uint8_t r1 = (colorStart >> 11) & 0x1F;
-        uint8_t g1 = (colorStart >> 5) & 0x3F;
-        uint8_t b1 = colorStart & 0x1F;
-        uint8_t r2 = (colorEnd >> 11) & 0x1F;
-        uint8_t g2 = (colorEnd >> 5) & 0x3F;
-        uint8_t b2 = colorEnd & 0x1F;
-        
-        uint8_t r = r1 + (r2 - r1) * i / w;
-        uint8_t g = g1 + (g2 - g1) * i / w;
-        uint8_t b = b1 + (b2 - b1) * i / w;
-        
-        uint16_t color = (r << 11) | (g << 5) | b;
-        tft.drawFastVLine(x + i, y, h, color);
+void printLCDLine(uint8_t row, const String& text) {
+    lcd.setCursor(0, row);
+    String line = text;
+    if (line.length() > 16) {
+        line = line.substring(0, 16);
     }
-}
-
-/**
- * Draw vertical gradient effect
- */
-void drawGradientV(int x, int y, int w, int h, uint16_t colorTop, uint16_t colorBottom) {
-    for (int i = 0; i < h; i++) {
-        uint8_t r1 = (colorTop >> 11) & 0x1F;
-        uint8_t g1 = (colorTop >> 5) & 0x3F;
-        uint8_t b1 = colorTop & 0x1F;
-        uint8_t r2 = (colorBottom >> 11) & 0x1F;
-        uint8_t g2 = (colorBottom >> 5) & 0x3F;
-        uint8_t b2 = colorBottom & 0x1F;
-        
-        uint8_t r = r1 + (r2 - r1) * i / h;
-        uint8_t g = g1 + (g2 - g1) * i / h;
-        uint8_t b = b1 + (b2 - b1) * i / h;
-        
-        uint16_t color = (r << 11) | (g << 5) | b;
-        tft.drawFastHLine(x, y + i, w, color);
+    while (line.length() < 16) {
+        line += " ";
     }
+    lcd.print(line);
 }
 
 /**
- * Draw a premium card with shadow effect
+ * Print text centered on specified LCD row
  */
-void drawPremiumCard(int x, int y, int w, int h, uint16_t bgColor, uint16_t borderColor, bool hasGlow = false) {
-    // Shadow (offset dark layer)
-    tft.fillRoundRect(x + SHADOW_OFFSET, y + SHADOW_OFFSET, w, h, BORDER_RADIUS, RGB565(5, 5, 10));
-    // Main card
-    tft.fillRoundRect(x, y, w, h, BORDER_RADIUS, bgColor);
-    // Border highlight on top-left (glass effect)
-    tft.drawRoundRect(x, y, w, h, BORDER_RADIUS, borderColor);
-    // Inner highlight line at top (subtle)
-    tft.drawFastHLine(x + 4, y + 1, w - 8, RGB565(60, 60, 80));
-}
-
-/**
- * Draw a glowing icon circle
- */
-void drawGlowCircle(int cx, int cy, int r, uint16_t color) {
-    // Outer glow layers
-    for (int i = GLOW_INTENSITY; i > 0; i--) {
-        uint8_t cr = (color >> 11) & 0x1F;
-        uint8_t cg = (color >> 5) & 0x3F;
-        uint8_t cb = color & 0x1F;
-        uint16_t glowColor = ((cr / (i + 1)) << 11) | ((cg / (i + 1)) << 5) | (cb / (i + 1));
-        tft.drawCircle(cx, cy, r + i * 2, glowColor);
-    }
-    // Solid center
-    tft.fillCircle(cx, cy, r, color);
-}
-
-/**
- * Draw a pulsing status indicator
- */
-void drawStatusIndicator(int x, int y, int r, uint16_t color, bool active = true) {
-    if (active) {
-        tft.drawCircle(x, y, r + 3, RGB565((color >> 11) & 0x0F, (color >> 6) & 0x1F, (color >> 1) & 0x0F));
-        tft.drawCircle(x, y, r + 2, RGB565((color >> 11) & 0x1F, (color >> 5) & 0x1F, (color) & 0x0F));
-    }
-    tft.fillCircle(x, y, r, color);
-    tft.fillCircle(x - r/3, y - r/3, r/4, COLOR_TEXT_PRIMARY);
-}
-
-/**
- * Draw premium header bar with gradient and accent
- */
-void drawHeader(const char* title) {
-    // Gradient header background
-    drawGradientV(0, 0, SCREEN_WIDTH, HEADER_HEIGHT, RGB565(20, 40, 65), COLOR_BG_HEADER);
-    
-    // Glowing accent line below header
-    tft.drawFastHLine(0, HEADER_HEIGHT - 2, SCREEN_WIDTH, COLOR_CYAN_DARK);
-    tft.drawFastHLine(0, HEADER_HEIGHT - 1, SCREEN_WIDTH, COLOR_CYAN);
-    tft.drawFastHLine(0, HEADER_HEIGHT, SCREEN_WIDTH, COLOR_CYAN_DARK);
-    
-    // Title with slight shadow for depth
-    tft.setTextSize(TEXT_MEDIUM);
-    int16_t x1, y1;
-    uint16_t w, h;
-    tft.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
-    int textY = (HEADER_HEIGHT - h) / 2 - 1;
-    
-    // Shadow
-    tft.setTextColor(RGB565(0, 0, 0));
-    tft.setCursor(MARGIN + 1, textY + 1);
-    tft.print(title);
-    
-    // Main text
-    tft.setTextColor(COLOR_TEXT_PRIMARY);
-    tft.setCursor(MARGIN, textY);
-    tft.print(title);
-}
-
-/**
- * Draw premium footer bar
- */
-void drawFooter(const char* hints) {
-    int footerY = SCREEN_HEIGHT - FOOTER_HEIGHT;
-    
-    // Accent lines above footer
-    tft.drawFastHLine(0, footerY - 2, SCREEN_WIDTH, COLOR_CYAN_DARK);
-    tft.drawFastHLine(0, footerY - 1, SCREEN_WIDTH, COLOR_ACCENT_LINE);
-    
-    // Gradient footer background
-    drawGradientV(0, footerY, SCREEN_WIDTH, FOOTER_HEIGHT, COLOR_BG_HEADER_ALT, RGB565(5, 12, 18));
-    
-    // Hint text
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_TEXT_SECONDARY);
-    tft.setCursor(MARGIN, footerY + (FOOTER_HEIGHT - 8) / 2);
-    tft.print(hints);
-}
-
-/**
- * Draw RSSI bar indicator (compact style for inline use)
- */
-void drawRssiBar(int x, int y, int level, int rssi) {
-    const int barWidth = 6;
-    const int barGap = 2;
-    const int maxHeight = 16;
-    const int numBars = 6;
-    
-    // Draw compact bars
-    for (int i = 0; i < numBars; i++) {
-        int barHeight = 3 + (i * maxHeight / numBars);
-        int barX = x + i * (barWidth + barGap);
-        int barY = y + maxHeight - barHeight;
-        
-        if (i < (level * numBars / 10)) {
-            uint16_t barColor;
-            if (i < 2) barColor = COLOR_RED;
-            else if (i < 4) barColor = COLOR_AMBER;
-            else barColor = COLOR_GREEN;
-            tft.fillRect(barX, barY, barWidth, barHeight, barColor);
-        } else {
-            tft.drawRect(barX, barY, barWidth, barHeight, COLOR_BORDER);
-        }
-    }
+void printLCDCenter(uint8_t row, const String& text) {
+    String line = text;
+    if (line.length() > 16) line = line.substring(0, 16);
+    int spaces = (16 - line.length()) / 2;
+    String fullLine = "";
+    for (int i = 0; i < spaces; i++) fullLine += " ";
+    fullLine += line;
+    while (fullLine.length() < 16) fullLine += " ";
+    lcd.setCursor(0, row);
+    lcd.print(fullLine);
 }
 
 /**
@@ -768,11 +466,7 @@ void playBootTone() {
     tone(BUZZER_PIN, 1500, 80);
 }
 
-/**
- * Add alert to history
- */
 void addToHistory(int deviceId, int alertIndex, int rssi) {
-    // Shift history if full
     if (historyCount >= HISTORY_MAX_ITEMS) {
         for (int i = 0; i < HISTORY_MAX_ITEMS - 1; i++) {
             alertHistory[i] = alertHistory[i + 1];
@@ -780,7 +474,6 @@ void addToHistory(int deviceId, int alertIndex, int rssi) {
         historyCount = HISTORY_MAX_ITEMS - 1;
     }
     
-    // Add new alert
     alertHistory[historyCount].deviceId = deviceId;
     alertHistory[historyCount].alertIndex = alertIndex;
     alertHistory[historyCount].rssi = rssi;
@@ -791,135 +484,28 @@ void addToHistory(int deviceId, int alertIndex, int rssi) {
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              1. BOOT SCREEN
-//         Purpose: System identity, trust, and readiness indicator
-//         Design: Authoritative, centered, industrial appearance
 // ═══════════════════════════════════════════════════════════════════════════════════
 
 void drawBootScreen() {
-    // Dark background
-    tft.fillScreen(COLOR_BG_PRIMARY);
-    
-    // ─────────────────── TOP ACCENT LINE ───────────────────
-    tft.drawFastHLine(0, 0, SCREEN_WIDTH, COLOR_CYAN_DARK);
-    tft.drawFastHLine(0, 1, SCREEN_WIDTH, COLOR_CYAN);
-    tft.drawFastHLine(0, 2, SCREEN_WIDTH, COLOR_CYAN_DARK);
-    
-    // ─────────────────── MEDICAL CROSS ICON ───────────────────
-    int iconX = SCREEN_WIDTH / 2;
-    int iconY = 45;
-    int crossW = 8;
-    int crossH = 24;
-    
-    // Cross with glow effect
-    tft.fillRect(iconX - crossW/2 - 1, iconY - crossH/2 - 1, crossW + 2, crossH + 2, COLOR_RED_DARK);
-    tft.fillRect(iconX - crossH/2 - 1, iconY - crossW/2 - 1, crossH + 2, crossW + 2, COLOR_RED_DARK);
-    tft.fillRect(iconX - crossW/2, iconY - crossH/2, crossW, crossH, COLOR_RED);
-    tft.fillRect(iconX - crossH/2, iconY - crossW/2, crossH, crossW, COLOR_RED);
-    
-    // ─────────────────── MAIN TITLE ───────────────────
-    tft.setTextSize(TEXT_LARGE);
-    int16_t x1, y1;
-    uint16_t tw, th;
-    tft.getTextBounds("LifeLine", 0, 0, &x1, &y1, &tw, &th);
-    int titleX = (SCREEN_WIDTH - tw) / 2;
-    int titleY = 78;
-    
-    // Shadow
-    tft.setTextColor(RGB565(0, 50, 70));
-    tft.setCursor(titleX + 1, titleY + 1);
-    tft.print(F("LifeLine"));
-    
-    // Main text
-    tft.setTextColor(COLOR_TEXT_PRIMARY);
-    tft.setCursor(titleX, titleY);
-    tft.print(F("LifeLine"));
-    
-    // ─────────────────── SUBTITLE ───────────────────
-    drawCenteredText("EMERGENCY RECEIVER", 108, TEXT_SMALL, COLOR_CYAN);
-    
-    // Separator line
-    int lineY = 122;
-    tft.drawFastHLine(50, lineY, SCREEN_WIDTH - 100, COLOR_ACCENT_LINE);
-    tft.fillCircle(50, lineY, 2, COLOR_CYAN_DARK);
-    tft.fillCircle(SCREEN_WIDTH - 50, lineY, 2, COLOR_CYAN_DARK);
-    
-    // ─────────────────── DEVICE TYPE BADGE ───────────────────
-    int badgeW = 100;
-    int badgeX = (SCREEN_WIDTH - badgeW) / 2;
-    int badgeY = 132;
-    
-    tft.fillRoundRect(badgeX, badgeY, badgeW, 22, 4, COLOR_BG_CARD);
-    tft.drawRoundRect(badgeX, badgeY, badgeW, 22, 4, COLOR_CYAN_DARK);
-    drawCenteredText("BASE STATION", badgeY + 7, TEXT_SMALL, COLOR_CYAN);
-    
-    // ─────────────────── INFO CARDS ───────────────────
-    int cardY = SCREEN_HEIGHT - 55;
-    int cardW = (SCREEN_WIDTH - MARGIN * 3) / 2;
-    int cardH = 40;
-    
-    // Left card - LoRa Status
-    tft.fillRoundRect(MARGIN, cardY, cardW, cardH, 4, COLOR_BG_CARD);
-    tft.drawRoundRect(MARGIN, cardY, cardW, cardH, 4, COLOR_BORDER);
-    
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setCursor(MARGIN + 8, cardY + 6);
-    tft.print(F("LORA"));
-    
-    tft.setTextColor(COLOR_GREEN);
-    tft.setCursor(MARGIN + 8, cardY + 20);
-    tft.print(F("433 MHz"));
-    
-    // Right card - Status
-    int rightCardX = MARGIN * 2 + cardW;
-    tft.fillRoundRect(rightCardX, cardY, cardW, cardH, 4, COLOR_BG_CARD);
-    tft.drawRoundRect(rightCardX, cardY, cardW, cardH, 4, COLOR_BORDER);
-    
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setCursor(rightCardX + 8, cardY + 6);
-    tft.print(F("STATUS"));
-    
-    tft.setTextColor(COLOR_GREEN);
-    tft.setCursor(rightCardX + 8, cardY + 20);
-    tft.print(F("Ready"));
-    
-    // ─────────────────── BOTTOM ACCENT ───────────────────
-    tft.drawFastHLine(0, SCREEN_HEIGHT - 3, SCREEN_WIDTH, COLOR_CYAN_DARK);
-    tft.drawFastHLine(0, SCREEN_HEIGHT - 2, SCREEN_WIDTH, COLOR_CYAN);
-    tft.drawFastHLine(0, SCREEN_HEIGHT - 1, SCREEN_WIDTH, COLOR_CYAN_DARK);
-    
+    lcd.clear();
+    printLCDCenter(0, "LIFELINE RX v3.1");
+    printLCDCenter(1, "Init LoRa...");
     bootStartTime = millis();
     bootDotState = 0;
-    Serial.println(F("[SCREEN] Boot screen displayed"));
+    Serial.println(F("[SCREEN] Boot screen displayed on 16x2 LCD"));
 }
 
-/**
- * Update boot screen loading animation
- * Returns true when boot is complete
- */
 bool updateBootAnimation() {
     unsigned long elapsed = millis() - bootStartTime;
-    
-    uint8_t newDotState = (elapsed / 400) % 4;
+    uint8_t newDotState = (elapsed / 300) % 4;
     
     if (newDotState != bootDotState) {
         bootDotState = newDotState;
-        
-        // Update loading indicator in right card
-        int cardY = SCREEN_HEIGHT - 55;
-        int cardW = (SCREEN_WIDTH - MARGIN * 3) / 2;
-        int rightCardX = MARGIN * 2 + cardW;
-        
-        // Clear and redraw status text
-        tft.fillRect(rightCardX + 8, cardY + 20, 65, 10, COLOR_BG_CARD);
-        tft.setTextSize(TEXT_SMALL);
-        tft.setTextColor(COLOR_GREEN);
-        tft.setCursor(rightCardX + 8, cardY + 20);
-        tft.print(F("Ready"));
+        String status = "Ready";
         for (int i = 0; i < bootDotState; i++) {
-            tft.print(F("."));
+            status += ".";
         }
+        printLCDCenter(1, status);
     }
     
     return elapsed >= BOOT_DISPLAY_TIME;
@@ -927,319 +513,70 @@ bool updateBootAnimation() {
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              2. IDLE SCREEN
-//         Purpose: Calm waiting state with live status indicators
-//         Design: Clean, minimal, with animated listening indicator
 // ═══════════════════════════════════════════════════════════════════════════════════
 
 void drawIdleScreen() {
-    // Premium dark background
-    tft.fillScreen(COLOR_BG_PRIMARY);
+    // Line 0: Title + Radar Icon
+    lcd.setCursor(0, 0);
+    lcd.print("LIFELINE RX  ");
+    lcd.write(0); // Radar symbol
+    lcd.print(" ");
     
-    // ─────────────────── PREMIUM HEADER ───────────────────
-    drawHeader("LIFELINE RX");
-    
-    // Live indicator badge in header (right side)
-    int badgeX = SCREEN_WIDTH - 52;
-    tft.fillRoundRect(badgeX, 13, 42, 14, 3, RGB565(10, 35, 20));
-    tft.drawRoundRect(badgeX, 13, 42, 14, 3, COLOR_GREEN_DARK);
-    tft.fillCircle(badgeX + 9, 20, 3, COLOR_GREEN);
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_GREEN);
-    tft.setCursor(badgeX + 16, 16);
-    tft.print(F("LIVE"));
-    
-    // ─────────────────── MAIN STATUS CARD ───────────────────
-    int mainCardY = HEADER_HEIGHT + 12;
-    int mainCardH = 85;
-    
-    // Main listening card background
-    tft.fillRoundRect(MARGIN, mainCardY, SCREEN_WIDTH - MARGIN * 2, mainCardH, 6, COLOR_BG_CARD);
-    tft.drawRoundRect(MARGIN, mainCardY, SCREEN_WIDTH - MARGIN * 2, mainCardH, 6, COLOR_BORDER);
-    
-    // Inner content area
-    int contentCenterX = SCREEN_WIDTH / 2;
-    int contentCenterY = mainCardY + 35;
-    
-    // Radar/Signal icon (simple and clean)
-    // Outer ring
-    tft.drawCircle(contentCenterX, contentCenterY, 22, COLOR_CYAN_DARK);
-    tft.drawCircle(contentCenterX, contentCenterY, 21, COLOR_CYAN_DARK);
-    // Middle ring
-    tft.drawCircle(contentCenterX, contentCenterY, 14, COLOR_CYAN);
-    // Inner filled circle
-    tft.fillCircle(contentCenterX, contentCenterY, 6, COLOR_CYAN);
-    tft.fillCircle(contentCenterX, contentCenterY, 3, COLOR_CYAN_BRIGHT);
-    
-    // Radar sweep line (static)
-    tft.drawLine(contentCenterX, contentCenterY, contentCenterX + 18, contentCenterY - 12, COLOR_CYAN_BRIGHT);
-    
-    // Status text below icon
-    drawCenteredText("LISTENING", mainCardY + 68, TEXT_SMALL, COLOR_TEXT_PRIMARY);
-    
-    // ─────────────────── STATUS MESSAGE ───────────────────
-    int msgY = mainCardY + mainCardH + 10;
-    drawCenteredText("Waiting for emergency signals...", msgY, TEXT_SMALL, COLOR_TEXT_MUTED);
-    
-    // ─────────────────── PULSE INDICATORS ───────────────────
-    int pulseY = msgY + 18;
-    for (int i = 0; i < 3; i++) {
-        int x = SCREEN_WIDTH / 2 - 22 + (i * 22);
-        tft.drawCircle(x, pulseY, 4, COLOR_BORDER);
-    }
-    
-    // ─────────────────── STATS ROW ───────────────────
-    int statsY = SCREEN_HEIGHT - FOOTER_HEIGHT - 38;
-    int statW = (SCREEN_WIDTH - MARGIN * 4) / 3;
-    
-    // Stat 1: LoRa Frequency
-    tft.fillRoundRect(MARGIN, statsY, statW, 28, 4, COLOR_BG_CARD);
-    tft.drawRoundRect(MARGIN, statsY, statW, 28, 4, COLOR_BORDER);
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setCursor(MARGIN + 6, statsY + 4);
-    tft.print(F("FREQ"));
-    tft.setTextColor(COLOR_CYAN);
-    tft.setCursor(MARGIN + 6, statsY + 15);
-    tft.print(F("433MHz"));
-    
-    // Stat 2: Alerts count
-    int stat2X = MARGIN * 2 + statW;
-    tft.fillRoundRect(stat2X, statsY, statW, 28, 4, COLOR_BG_CARD);
-    tft.drawRoundRect(stat2X, statsY, statW, 28, 4, COLOR_BORDER);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setCursor(stat2X + 6, statsY + 4);
-    tft.print(F("ALERTS"));
-    tft.setTextColor(COLOR_AMBER);
-    tft.setCursor(stat2X + 6, statsY + 15);
-    tft.print(totalAlertsReceived);
-    
-    // Stat 3: Status
-    int stat3X = MARGIN * 3 + statW * 2;
-    tft.fillRoundRect(stat3X, statsY, statW, 28, 4, COLOR_BG_CARD);
-    tft.drawRoundRect(stat3X, statsY, statW, 28, 4, COLOR_BORDER);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setCursor(stat3X + 6, statsY + 4);
-    tft.print(F("STATUS"));
-    tft.setTextColor(COLOR_GREEN);
-    tft.setCursor(stat3X + 6, statsY + 15);
-    tft.print(F("READY"));
-    
-    // ─────────────────── PREMIUM FOOTER ───────────────────
-    drawFooter("Auto-receiving mode");
+    // Line 1: Freq & Alerts count
+    char line1[17];
+    snprintf(line1, sizeof(line1), "433MHz  Alt:%-4d", totalAlertsReceived);
+    printLCDLine(1, line1);
     
     lastPulseTime = millis();
     pulseState = 0;
-    Serial.println(F("[SCREEN] Idle screen displayed"));
+    Serial.println(F("[SCREEN] Idle screen displayed on 16x2 LCD"));
 }
 
-/**
- * Update idle screen animations (non-blocking)
- */
 void updateIdleAnimation() {
     unsigned long currentTime = millis();
     
     if (currentTime - lastPulseTime >= IDLE_PULSE_INTERVAL) {
         lastPulseTime = currentTime;
         
-        // Calculate positions (must match drawIdleScreen)
-        int mainCardY = HEADER_HEIGHT + 12;
-        int mainCardH = 85;
-        int msgY = mainCardY + mainCardH + 10;
-        int pulseY = msgY + 18;
-        
-        // Clear and redraw pulse indicators
-        for (int i = 0; i < 3; i++) {
-            int x = SCREEN_WIDTH / 2 - 22 + (i * 22);
-            tft.fillCircle(x, pulseY, 6, COLOR_BG_PRIMARY);
-            tft.drawCircle(x, pulseY, 4, COLOR_BORDER);
+        // Toggle radar icon at column 14, row 0
+        lcd.setCursor(14, 0);
+        if (pulseState == 0) {
+            lcd.write(0); // Radar glyph
+        } else {
+            lcd.print("o");
         }
+        pulseState = (pulseState + 1) % 2;
         
-        // Draw active pulse
-        int activeX = SCREEN_WIDTH / 2 - 22 + (pulseState * 22);
-        tft.fillCircle(activeX, pulseY, 4, COLOR_CYAN);
-        
-        pulseState = (pulseState + 1) % 3;
-        
-        // Update live indicator pulse in header
-        int badgeX = SCREEN_WIDTH - 52;
-        bool bright = (pulseState == 0);
-        tft.fillCircle(badgeX + 9, 20, 3, bright ? COLOR_GREEN_BRIGHT : COLOR_GREEN);
-        
-        // Animate radar sweep (optional subtle effect)
-        int contentCenterX = SCREEN_WIDTH / 2;
-        int contentCenterY = mainCardY + 35;
-        
-        // Clear previous sweep
-        tft.drawLine(contentCenterX, contentCenterY, 
-                     contentCenterX + 18, contentCenterY - 12, COLOR_BG_CARD);
-        
-        // Draw new sweep based on state
-        int sweepAngles[3][2] = {{18, -12}, {20, 0}, {14, 14}};
-        tft.drawLine(contentCenterX, contentCenterY,
-                     contentCenterX + sweepAngles[pulseState][0], 
-                     contentCenterY + sweepAngles[pulseState][1], COLOR_CYAN_BRIGHT);
+        // Update total alert count dynamically on line 1
+        char line1[17];
+        snprintf(line1, sizeof(line1), "433MHz  Alt:%-4d", totalAlertsReceived);
+        printLCDLine(1, line1);
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              3. ALERT SCREEN
-//         Purpose: Maximum visibility for incoming emergency alerts
-//         Design: Color-coded priority, large text, glowing indicators
 // ═══════════════════════════════════════════════════════════════════════════════════
 
 void drawAlertScreen(int deviceId, int alertIndex, int rssi) {
-    uint16_t alertColor = getAlertColor(alertIndex);
     uint8_t priority = alertPriority[alertIndex];
+    char code = getAlertCode(alertIndex);
+    const char* nameShort = alertNamesShort[alertIndex];
     
-    // Dark background
-    tft.fillScreen(COLOR_BG_PRIMARY);
+    // Line 0: Warning icon + Code + Short Name (e.g. "!A MEDICAL EMERG")
+    lcd.setCursor(0, 0);
+    lcd.write(4); // Warning icon glyph
     
-    // ─────────────────── ALERT HEADER ───────────────────
-    tft.fillRect(0, 0, SCREEN_WIDTH, HEADER_HEIGHT, alertColor);
-    tft.drawFastHLine(0, HEADER_HEIGHT - 1, SCREEN_WIDTH, COLOR_TEXT_PRIMARY);
+    char row0[17];
+    snprintf(row0, sizeof(row0), "%c %-13s", code, nameShort);
+    lcd.print(row0);
     
-    // Warning triangle icon
-    int triX = MARGIN + 12;
-    int triY = HEADER_HEIGHT / 2;
-    tft.fillTriangle(triX, triY - 8, triX - 8, triY + 6, triX + 8, triY + 6, COLOR_TEXT_DARK);
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(alertColor);
-    tft.setCursor(triX - 3, triY - 2);
-    tft.print('!');
+    // Line 1: Device ID + RSSI + Priority (e.g. "TX#001 -65dBm CRIT")
+    const char* priLabel = (priority == 0) ? "CRIT" : (priority == 1) ? "HIGH" : (priority == 2) ? "MED " : "OK  ";
     
-    // Header title
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setTextColor(COLOR_TEXT_DARK);
-    tft.setCursor(MARGIN + 28, (HEADER_HEIGHT - 14) / 2);
-    tft.print(F("INCOMING ALERT"));
-    
-    // Active badge (right side)
-    int activeBadgeX = SCREEN_WIDTH - 58;
-    tft.fillRoundRect(activeBadgeX, 12, 48, 16, 3, COLOR_TEXT_DARK);
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(alertColor);
-    tft.setCursor(activeBadgeX + 5, 15);
-    tft.print(F("ACTIVE"));
-    
-    // ─────────────────── PRIORITY BADGE ───────────────────
-    int badgeY = HEADER_HEIGHT + 8;
-    int badgeW = 65;
-    tft.fillRoundRect(MARGIN, badgeY, badgeW, 16, 3, alertColor);
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_TEXT_DARK);
-    tft.setCursor(MARGIN + 5, badgeY + 4);
-    tft.print(priorityLabels[min((int)priority, 4)]);
-    
-    // ─────────────────── MAIN ALERT CARD ───────────────────
-    int cardY = badgeY + 24;
-    int cardH = 42;
-    int cardW = SCREEN_WIDTH - MARGIN * 2;
-    
-    // Card background
-    tft.fillRoundRect(MARGIN, cardY, cardW, cardH, 4, COLOR_BG_CARD);
-    tft.drawRoundRect(MARGIN, cardY, cardW, cardH, 4, alertColor);
-    
-    // Left accent bar
-    tft.fillRect(MARGIN, cardY, 4, cardH, alertColor);
-    
-    // Alert name
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setTextColor(alertColor);
-    tft.setCursor(MARGIN + 12, cardY + 8);
-    tft.print(alertNamesShort[alertIndex]);
-    
-    // Alert code badge (right side of card)
-    int codeBadgeX = SCREEN_WIDTH - MARGIN - 32;
-    tft.fillRoundRect(codeBadgeX, cardY + 6, 24, 16, 3, alertColor);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setTextColor(COLOR_TEXT_DARK);
-    tft.setCursor(codeBadgeX + 6, cardY + 8);
-    tft.print(getAlertCode(alertIndex));
-    
-    // Alert index text
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setCursor(MARGIN + 12, cardY + 28);
-    tft.print(F("Alert #"));
-    tft.setTextColor(COLOR_TEXT_PRIMARY);
-    tft.print(alertIndex + 1);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.print(F(" of "));
-    tft.print(ALERT_COUNT);
-    
-    // ─────────────────── DEVICE & SIGNAL ROW ───────────────────
-    int infoY = cardY + cardH + 10;
-    int halfW = (SCREEN_WIDTH - MARGIN * 3) / 2;
-    
-    // Device ID card (left)
-    tft.fillRoundRect(MARGIN, infoY, halfW, 34, 4, COLOR_BG_CARD);
-    tft.drawRoundRect(MARGIN, infoY, halfW, 34, 4, COLOR_CYAN_DARK);
-    
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setCursor(MARGIN + 6, infoY + 4);
-    tft.print(F("FROM DEVICE"));
-    
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setTextColor(COLOR_CYAN);
-    tft.setCursor(MARGIN + 6, infoY + 17);
-    tft.print(F("TX #"));
-    if (deviceId < 100) tft.print('0');
-    if (deviceId < 10) tft.print('0');
-    tft.print(deviceId);
-    
-    // Signal card (right)
-    int rssiCardX = MARGIN * 2 + halfW;
-    tft.fillRoundRect(rssiCardX, infoY, halfW, 34, 4, COLOR_BG_CARD);
-    tft.drawRoundRect(rssiCardX, infoY, halfW, 34, 4, COLOR_BORDER);
-    
-    // Signal label and value
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setCursor(rssiCardX + 6, infoY + 4);
-    tft.print(F("SIGNAL"));
-    
-    // RSSI value
-    char rssiStr[10];
-    sprintf(rssiStr, "%d dBm", rssi);
-    tft.setTextColor(COLOR_TEXT_PRIMARY);
-    tft.setCursor(rssiCardX + 50, infoY + 4);
-    tft.print(rssiStr);
-    
-    // Mini RSSI bars
-    int rssiLevel = getRssiBarLevel(rssi);
-    int barStartX = rssiCardX + 6;
-    int barY = infoY + 20;
-    for (int i = 0; i < 5; i++) {
-        int barH = 4 + i * 2;
-        int barX = barStartX + i * 10;
-        uint16_t barColor = (i < rssiLevel / 2) ? 
-            ((i < 2) ? COLOR_RED : ((i < 3) ? COLOR_AMBER : COLOR_GREEN)) : COLOR_BORDER;
-        tft.fillRect(barX, barY + 12 - barH, 7, barH, barColor);
-    }
-    
-    // ─────────────────── VERIFIED BADGE ───────────────────
-    int statusY = infoY + 44;
-    int statusW = 90;
-    int statusX = (SCREEN_WIDTH - statusW) / 2;
-    
-    tft.fillRoundRect(statusX, statusY, statusW, 22, 4, COLOR_GREEN);
-    
-    // Simple checkmark
-    int checkX = statusX + 12;
-    int checkY = statusY + 11;
-    tft.drawLine(checkX - 4, checkY, checkX - 1, checkY + 4, COLOR_TEXT_DARK);
-    tft.drawLine(checkX - 1, checkY + 4, checkX + 6, checkY - 3, COLOR_TEXT_DARK);
-    tft.drawLine(checkX - 4, checkY + 1, checkX - 1, checkY + 5, COLOR_TEXT_DARK);
-    tft.drawLine(checkX - 1, checkY + 5, checkX + 6, checkY - 2, COLOR_TEXT_DARK);
-    
-    tft.setTextSize(TEXT_SMALL);
-    tft.setTextColor(COLOR_TEXT_DARK);
-    tft.setCursor(statusX + 26, statusY + 7);
-    tft.print(F("VERIFIED"));
-    
-    // ─────────────────── FOOTER ───────────────────
-    drawFooter("Auto-dismiss in 30 seconds");
+    char row1[17];
+    snprintf(row1, sizeof(row1), "TX#%03d %d%s %s", deviceId % 1000, rssi, "dBm", priLabel);
+    printLCDLine(1, row1);
     
     // Store alert data
     lastDeviceId = deviceId;
@@ -1253,13 +590,10 @@ void drawAlertScreen(int deviceId, int alertIndex, int rssi) {
     // Play alert sound
     playAlertTone(priority);
     
-    Serial.printf("[SCREEN] Alert displayed: Device %d, Alert %d (%s)\n", 
+    Serial.printf("[SCREEN] Alert displayed on LCD: Device %d, Alert %d (%s)\n", 
                   deviceId, alertIndex, alertNames[alertIndex]);
 }
 
-/**
- * Check if alert display time has elapsed
- */
 bool shouldReturnToIdle() {
     if (currentScreen != SCREEN_ALERT) return false;
     return (millis() - alertReceivedTime >= ALERT_DISPLAY_TIME);
@@ -1269,10 +603,6 @@ bool shouldReturnToIdle() {
 //                              LORA PACKET HANDLING
 // ═══════════════════════════════════════════════════════════════════════════════════
 
-/**
- * Parse incoming LoRa packet
- * Expected format: DEVICE_ID,ALERT_CODE or TX[ID],[CODE]
- */
 bool parseLoRaPacket(int& deviceId, int& alertIndex, int& rssi) {
     int packetSize = LoRa.parsePacket();
     if (packetSize == 0) return false;
@@ -1286,7 +616,6 @@ bool parseLoRaPacket(int& deviceId, int& alertIndex, int& rssi) {
     
     Serial.printf("[RX] Raw packet (%d bytes): '%s', RSSI: %d\n", packetSize, data.c_str(), rssi);
     
-    // Handle TX prefix if present
     if (data.startsWith("TX")) {
         data = data.substring(2);
     }
@@ -1302,7 +631,6 @@ bool parseLoRaPacket(int& deviceId, int& alertIndex, int& rssi) {
     String alertPart = data.substring(comma + 1);
     alertPart.trim();
     
-    // Handle character-based alert code (A-O = 0-14)
     if (alertPart.length() == 1 && alertPart[0] >= 'A' && alertPart[0] <= 'O') {
         alertIndex = alertPart[0] - 'A';
     } else if (alertPart.length() == 1 && alertPart[0] >= 'a' && alertPart[0] <= 'o') {
@@ -1311,7 +639,6 @@ bool parseLoRaPacket(int& deviceId, int& alertIndex, int& rssi) {
         alertIndex = alertPart.toInt();
     }
     
-    // Validate
     if (alertIndex < 0 || alertIndex >= ALERT_COUNT) {
         Serial.printf("[RX] Invalid alert index %d, defaulting to OTHER\n", alertIndex);
         alertIndex = ALERT_COUNT - 1;
@@ -1319,7 +646,6 @@ bool parseLoRaPacket(int& deviceId, int& alertIndex, int& rssi) {
     
     Serial.printf("[RX] Parsed: Device=%d, Alert=%d (%s)\n", deviceId, alertIndex, alertNames[alertIndex]);
     
-    // Re-enter receive mode for next packet
     LoRa.receive();
     
     return true;
@@ -1329,11 +655,8 @@ bool parseLoRaPacket(int& deviceId, int& alertIndex, int& rssi) {
 //                              WIFI & API FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════════════
 
-/**
- * Load WiFi credentials from persistent storage
- */
 void loadWiFiCredentials() {
-    preferences.begin("lifeline", true);  // Read-only
+    preferences.begin("lifeline", true);
     storedSSID = preferences.getString("ssid", "");
     storedPassword = preferences.getString("password", "");
     preferences.end();
@@ -1345,11 +668,8 @@ void loadWiFiCredentials() {
     }
 }
 
-/**
- * Save WiFi credentials to persistent storage
- */
 void saveWiFiCredentials(const String& ssid, const String& password) {
-    preferences.begin("lifeline", false);  // Read-write
+    preferences.begin("lifeline", false);
     preferences.putString("ssid", ssid);
     preferences.putString("password", password);
     preferences.end();
@@ -1359,118 +679,23 @@ void saveWiFiCredentials(const String& ssid, const String& password) {
     Serial.printf("[WIFI] Saved credentials for SSID: %s\n", ssid.c_str());
 }
 
-/**
- * Draw WiFi connecting screen on TFT
- */
 void drawWiFiConnectingScreen(const String& ssid) {
-    tft.fillScreen(COLOR_BG_PRIMARY);
-    
-    // Header
-    tft.fillRect(0, 0, SCREEN_WIDTH, HEADER_HEIGHT, COLOR_BG_HEADER);
-    tft.setTextColor(COLOR_CYAN);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setCursor(MARGIN, 12);
-    tft.print("WiFi Connecting");
-    
-    // Content
-    int y = CONTENT_START_Y + 30;
-    
-    tft.setTextColor(COLOR_AMBER);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setCursor(MARGIN, y);
-    tft.print("Connecting to:");
-    
-    y += 30;
-    tft.setTextColor(COLOR_TEXT_PRIMARY);
-    tft.setCursor(MARGIN, y);
-    tft.print(ssid);
-    
-    y += 40;
-    tft.setTextColor(COLOR_TEXT_SECONDARY);
-    tft.setCursor(MARGIN, y);
-    tft.print("Please wait...");
+    printLCDLine(0, "WiFi Connecting");
+    String line1 = "SSID:" + ssid;
+    printLCDLine(1, line1);
 }
 
-/**
- * Draw WiFi connected screen with IP
- */
 void drawWiFiConnectedScreen(const String& ip) {
-    tft.fillScreen(COLOR_BG_PRIMARY);
-    
-    // Header
-    tft.fillRect(0, 0, SCREEN_WIDTH, HEADER_HEIGHT, COLOR_BG_HEADER);
-    tft.setTextColor(COLOR_GREEN);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setCursor(MARGIN, 12);
-    tft.print("WiFi Connected!");
-    
-    // Content
-    int y = CONTENT_START_Y + 30;
-    
-    tft.setTextColor(COLOR_AMBER);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setCursor(MARGIN, y);
-    tft.print("Network:");
-    
-    y += 28;
-    tft.setTextColor(COLOR_TEXT_PRIMARY);
-    tft.setCursor(MARGIN, y);
-    tft.print(storedSSID);
-    
-    y += 40;
-    tft.setTextColor(COLOR_AMBER);
-    tft.setCursor(MARGIN, y);
-    tft.print("IP Address:");
-    
-    y += 28;
-    tft.setTextColor(COLOR_GREEN);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setCursor(MARGIN, y);
-    tft.print(ip);
-    
-    // Footer
-    tft.fillRect(0, SCREEN_HEIGHT - FOOTER_HEIGHT, SCREEN_WIDTH, FOOTER_HEIGHT, COLOR_BG_HEADER);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setTextSize(TEXT_SMALL);
-    tft.setCursor(MARGIN, SCREEN_HEIGHT - FOOTER_HEIGHT + 12);
-    tft.print("Returning to main screen...");
+    printLCDLine(0, "WiFi Connected!");
+    String line1 = "IP:" + ip;
+    printLCDLine(1, line1);
 }
 
-/**
- * Draw WiFi failed screen
- */
 void drawWiFiFailedScreen() {
-    tft.fillScreen(COLOR_BG_PRIMARY);
-    
-    // Header
-    tft.fillRect(0, 0, SCREEN_WIDTH, HEADER_HEIGHT, COLOR_BG_HEADER);
-    tft.setTextColor(COLOR_RED);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setCursor(MARGIN, 12);
-    tft.print("WiFi Failed!");
-    
-    // Content
-    int y = CONTENT_START_Y + 30;
-    
-    tft.setTextColor(COLOR_TEXT_PRIMARY);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setCursor(MARGIN, y);
-    tft.print("Connection failed");
-    
-    y += 35;
-    tft.setTextColor(COLOR_AMBER);
-    tft.setCursor(MARGIN, y);
-    tft.print("Opening setup");
-    
-    y += 28;
-    tft.setCursor(MARGIN, y);
-    tft.print("portal...");
+    printLCDLine(0, "WiFi Failed!");
+    printLCDLine(1, "Opening Portal..");
 }
 
-/**
- * Connect to WiFi silently at boot (no display, no auto-portal on failure)
- * Used for automatic connection on startup
- */
 bool connectToWiFiSilent() {
     if (storedSSID.length() == 0) {
         Serial.println(F("[WIFI] No credentials stored"));
@@ -1500,9 +725,6 @@ bool connectToWiFiSilent() {
     }
 }
 
-/**
- * Connect to WiFi using stored credentials with display feedback
- */
 bool connectToWiFi() {
     if (storedSSID.length() == 0) {
         Serial.println(F("[WIFI] No credentials stored"));
@@ -1511,27 +733,15 @@ bool connectToWiFi() {
     
     Serial.printf("[WIFI] Connecting to %s...\n", storedSSID.c_str());
     
-    // Show connecting screen
     drawWiFiConnectingScreen(storedSSID);
     
     WiFi.mode(WIFI_STA);
     WiFi.begin(storedSSID.c_str(), storedPassword.c_str());
     
     unsigned long startTime = millis();
-    int dotCount = 0;
     while (WiFi.status() != WL_CONNECTED && (millis() - startTime) < WIFI_CONNECT_TIMEOUT) {
         delay(500);
         Serial.print(".");
-        
-        // Update dots on screen
-        tft.setTextColor(COLOR_CYAN);
-        tft.setTextSize(TEXT_MEDIUM);
-        tft.setCursor(MARGIN + (dotCount * 12), CONTENT_START_Y + 100);
-        tft.print(".");
-        dotCount = (dotCount + 1) % 10;
-        if (dotCount == 0) {
-            tft.fillRect(MARGIN, CONTENT_START_Y + 95, 150, 25, COLOR_BG_PRIMARY);
-        }
     }
     Serial.println();
     
@@ -1540,30 +750,21 @@ bool connectToWiFi() {
         String ip = WiFi.localIP().toString();
         Serial.printf("[WIFI] Connected! IP: %s\n", ip.c_str());
         
-        // Show connected screen
         drawWiFiConnectedScreen(ip);
-        delay(2000);  // Show for 2 seconds
-        
+        delay(2000);
         return true;
     } else {
         wifiConnected = false;
         Serial.println(F("[WIFI] Connection failed"));
         
-        // Show failed screen
         drawWiFiFailedScreen();
         delay(1500);
         
-        // Auto-open portal on failure
-        Serial.println(F("[WIFI] Auto-opening configuration portal..."));
         startWiFiPortal();
-        
         return false;
     }
 }
 
-/**
- * Push alert data to web dashboard API
- */
 void pushAlertToAPI(int deviceId, int alertIndex, int rssi) {
     if (!wifiConnected || WiFi.status() != WL_CONNECTED) {
         Serial.println(F("[API] WiFi not connected, skipping API push"));
@@ -1574,7 +775,6 @@ void pushAlertToAPI(int deviceId, int alertIndex, int rssi) {
     http.begin(API_ENDPOINT);
     http.addHeader("Content-Type", "application/json");
     
-    // Create JSON payload: { DID: device_id, message_code: alert_code, RSSI: rssi }
     String jsonPayload = "{\"DID\":" + String(deviceId) + 
                          ",\"message_code\":" + String(alertIndex) + 
                          ",\"RSSI\":" + String(rssi) + "}";
@@ -1593,9 +793,6 @@ void pushAlertToAPI(int deviceId, int alertIndex, int rssi) {
     http.end();
 }
 
-/**
- * Generate WiFi portal HTML page
- */
 String getPortalHTML() {
     String html = "<!DOCTYPE html><html><head>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
@@ -1631,16 +828,10 @@ String getPortalHTML() {
     return html;
 }
 
-/**
- * Handle root page request
- */
 void handlePortalRoot() {
     wifiServer.send(200, "text/html", getPortalHTML());
 }
 
-/**
- * Handle save credentials request
- */
 void handlePortalSave() {
     String ssid = wifiServer.arg("ssid");
     String password = wifiServer.arg("password");
@@ -1667,17 +858,12 @@ void handlePortalSave() {
     }
 }
 
-/**
- * Start WiFi configuration portal (AP mode)
- */
 void startWiFiPortal() {
     Serial.println(F("[WIFI] Starting configuration portal..."));
     
-    // Stop any existing connection
     WiFi.disconnect(true);
     delay(100);
     
-    // Start AP mode
     WiFi.mode(WIFI_AP);
     WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD);
     
@@ -1685,7 +871,6 @@ void startWiFiPortal() {
     Serial.printf("[WIFI] Portal started! Connect to '%s' (password: %s)\n", WIFI_AP_SSID, WIFI_AP_PASSWORD);
     Serial.printf("[WIFI] Portal IP: %s\n", apIP.toString().c_str());
     
-    // Setup web server routes
     wifiServer.on("/", handlePortalRoot);
     wifiServer.on("/save", HTTP_POST, handlePortalSave);
     wifiServer.begin();
@@ -1693,13 +878,9 @@ void startWiFiPortal() {
     portalActive = true;
     portalStartTime = millis();
     
-    // Show portal info on TFT
     drawWiFiPortalScreen();
 }
 
-/**
- * Stop WiFi configuration portal
- */
 void stopWiFiPortal() {
     if (!portalActive) return;
     
@@ -1708,142 +889,65 @@ void stopWiFiPortal() {
     WiFi.softAPdisconnect(true);
     portalActive = false;
     
-    // Try to connect with stored credentials
     if (storedSSID.length() > 0) {
         connectToWiFi();
     }
     
-    // Return to idle screen
     if (currentScreen != SCREEN_ALERT) {
         currentScreen = SCREEN_IDLE;
         drawIdleScreen();
     }
 }
 
-/**
- * Draw WiFi portal screen on TFT
- */
 void drawWiFiPortalScreen() {
-    tft.fillScreen(COLOR_BG_PRIMARY);
-    
-    // Header
-    tft.fillRect(0, 0, SCREEN_WIDTH, HEADER_HEIGHT, COLOR_BG_HEADER);
-    tft.setTextColor(COLOR_CYAN);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setCursor(MARGIN, 12);
-    tft.print("WiFi Setup");
-    
-    // Content
-    int y = CONTENT_START_Y + 10;
-    
-    tft.setTextColor(COLOR_AMBER);
-    tft.setTextSize(TEXT_MEDIUM);
-    tft.setCursor(MARGIN, y);
-    tft.print("Connect to WiFi:");
-    
-    y += 30;
-    tft.setTextColor(COLOR_TEXT_PRIMARY);
-    tft.setCursor(MARGIN, y);
-    tft.print(WIFI_AP_SSID);
-    
-    y += 30;
-    tft.setTextColor(COLOR_AMBER);
-    tft.setCursor(MARGIN, y);
-    tft.print("Password:");
-    
-    y += 25;
-    tft.setTextColor(COLOR_TEXT_PRIMARY);
-    tft.setCursor(MARGIN, y);
-    tft.print(WIFI_AP_PASSWORD);
-    
-    y += 35;
-    tft.setTextColor(COLOR_CYAN);
-    tft.setCursor(MARGIN, y);
-    tft.print("Then open:");
-    
-    y += 25;
-    tft.setTextColor(COLOR_GREEN);
-    tft.setCursor(MARGIN, y);
-    tft.print("192.168.4.1");
-    
-    // Footer
-    tft.fillRect(0, SCREEN_HEIGHT - FOOTER_HEIGHT, SCREEN_WIDTH, FOOTER_HEIGHT, COLOR_BG_HEADER);
-    tft.setTextColor(COLOR_TEXT_MUTED);
-    tft.setTextSize(TEXT_SMALL);
-    tft.setCursor(MARGIN, SCREEN_HEIGHT - FOOTER_HEIGHT + 12);
-    tft.print("Hold EN 3s to exit");
+    printLCDLine(0, "AP:LifeLine-RX");
+    printLCDLine(1, "IP:192.168.4.1");
 }
 
-/**
- * Draw long press progress on screen
- */
 void drawLongPressProgress(float progress) {
-    int barWidth = SCREEN_WIDTH - (2 * MARGIN);
-    int barHeight = 8;
-    int barY = SCREEN_HEIGHT - FOOTER_HEIGHT - 15;
+    printLCDLine(0, "WiFi Setup Mode");
+    int fillCount = (int)(progress * 10.0);
+    if (fillCount > 10) fillCount = 10;
     
-    // Background bar
-    tft.fillRect(MARGIN, barY, barWidth, barHeight, COLOR_BG_CARD);
-    
-    // Progress bar
-    int progressWidth = (int)(barWidth * progress);
-    if (progressWidth > 0) {
-        tft.fillRect(MARGIN, barY, progressWidth, barHeight, COLOR_CYAN);
+    String bar = "Hold:[";
+    for (int i = 0; i < 10; i++) {
+        if (i < fillCount) bar += "=";
+        else bar += " ";
     }
-    
-    // Text
-    tft.fillRect(MARGIN, barY - 20, barWidth, 18, COLOR_BG_PRIMARY);
-    tft.setTextColor(COLOR_AMBER);
-    tft.setTextSize(TEXT_SMALL);
-    tft.setCursor(MARGIN, barY - 15);
-    if (progress < 1.0) {
-        tft.print("Hold EN button for WiFi setup...");
-    } else {
-        tft.print("Activating WiFi setup...");
-    }
+    bar += "]";
+    printLCDLine(1, bar);
 }
 
-/**
- * Check WiFi portal button (EN/GPIO0) - 3 second long press
- */
 void checkWiFiPortalButton() {
     bool currentButtonState = digitalRead(WIFI_PORTAL_PIN);
     
-    // Button pressed (LOW = pressed on EN button)
     if (currentButtonState == LOW) {
         if (!buttonPressed) {
-            // Button just pressed - start timing
             buttonPressed = true;
             buttonPressStartTime = millis();
         } else {
-            // Button held - check duration
             unsigned long pressDuration = millis() - buttonPressStartTime;
             float progress = (float)pressDuration / LONG_PRESS_DURATION;
             
             if (progress > 1.0) progress = 1.0;
             
-            // Show progress on current screen (only if not in portal mode)
-            if (!portalActive && pressDuration > 200) {  // Start showing after 200ms
+            if (!portalActive && pressDuration > 200) {
                 drawLongPressProgress(progress);
             }
             
-            // Long press detected
             if (pressDuration >= LONG_PRESS_DURATION) {
-                buttonPressed = false;  // Reset to prevent re-trigger
+                buttonPressed = false;
                 
                 if (portalActive) {
-                    // Exit portal mode
                     stopWiFiPortal();
                 } else {
-                    // Enter WiFi setup - try connecting first, portal opens on failure
                     if (storedSSID.length() > 0) {
-                        connectToWiFi();  // This will auto-open portal if it fails
+                        connectToWiFi();
                     } else {
-                        startWiFiPortal();  // No credentials, open portal directly
+                        startWiFiPortal();
                     }
                 }
                 
-                // Redraw current screen to remove progress bar
                 if (!portalActive) {
                     if (currentScreen == SCREEN_IDLE) {
                         drawIdleScreen();
@@ -1854,11 +958,9 @@ void checkWiFiPortalButton() {
             }
         }
     } else {
-        // Button released
         if (buttonPressed) {
             buttonPressed = false;
             
-            // Redraw screen to remove progress bar (if short press)
             if (!portalActive && (millis() - buttonPressStartTime) > 200) {
                 if (currentScreen == SCREEN_IDLE) {
                     drawIdleScreen();
@@ -1870,15 +972,11 @@ void checkWiFiPortalButton() {
     }
 }
 
-/**
- * Handle WiFi portal in main loop
- */
 void handleWiFiPortal() {
     if (!portalActive) return;
     
     wifiServer.handleClient();
     
-    // Auto-timeout portal
     if (millis() - portalStartTime >= WIFI_PORTAL_TIMEOUT) {
         Serial.println(F("[WIFI] Portal timeout, closing..."));
         stopWiFiPortal();
@@ -1890,25 +988,22 @@ void handleWiFiPortal() {
 // ═══════════════════════════════════════════════════════════════════════════════════
 
 void setup() {
-    // Initialize Serial for debugging
     Serial.begin(SERIAL_BAUD_RATE);
     delay(100);
     
     Serial.println(F("\n╔═══════════════════════════════════════════════════════════╗"));
     Serial.println(F("║      LIFELINE EMERGENCY RECEIVER v3.1 PRO                 ║"));
-    Serial.println(F("║            Professional Base Station                      ║"));
+    Serial.println(F("║          16x2 I2C LCD Base Station                        ║"));
     Serial.println(F("╚═══════════════════════════════════════════════════════════╝\n"));
     
     // Initialize pins
     pinMode(BUZZER_PIN, OUTPUT);
     pinMode(LED_GREEN, OUTPUT);
     pinMode(LED_RED, OUTPUT);
-    pinMode(TFT_CS, OUTPUT);
     pinMode(LORA_CS, OUTPUT);
     pinMode(LORA_RST, OUTPUT);
-    pinMode(WIFI_PORTAL_PIN, INPUT_PULLUP);  // WiFi portal button (EN/GPIO0)
+    pinMode(WIFI_PORTAL_PIN, INPUT_PULLUP);
     
-    digitalWrite(TFT_CS, HIGH);
     digitalWrite(LORA_CS, HIGH);
     digitalWrite(LED_GREEN, LOW);
     digitalWrite(LED_RED, LOW);
@@ -1919,11 +1014,28 @@ void setup() {
     digitalWrite(LORA_RST, HIGH);
     delay(10);
     
-    // Initialize SPI
-    SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
-    Serial.println(F("[OK] SPI initialized"));
+    // Initialize I2C Bus for LCD (SDA: GPIO 4, SCL: GPIO 16)
+    Wire.begin(LCD_SDA, LCD_SCL);
     
-    // Initialize LoRa - WORKING CONFIGURATION
+    // Initialize 16x2 I2C LCD
+    lcd.init();
+    lcd.backlight();
+    
+    // Register custom glyphs into LCD CGRAM (0-4)
+    lcd.createChar(0, (uint8_t*)glyphRadar);
+    lcd.createChar(1, (uint8_t*)glyphBell);
+    lcd.createChar(2, (uint8_t*)glyphCheck);
+    lcd.createChar(3, (uint8_t*)glyphSignal);
+    lcd.createChar(4, (uint8_t*)glyphWarn);
+    
+    Serial.printf("[OK] 16x2 I2C LCD initialized (SDA: GPIO %d, SCL: GPIO %d, Addr: 0x%02X)\n", 
+                  LCD_SDA, LCD_SCL, LCD_ADDR);
+    
+    // Initialize SPI for LoRa
+    SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
+    Serial.println(F("[OK] SPI initialized for LoRa"));
+    
+    // Initialize LoRa
     LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
     if (!LoRa.begin(LORA_FREQUENCY)) {
         Serial.println(F("[ERROR] LoRa initialization failed!"));
@@ -1937,14 +1049,7 @@ void setup() {
         Serial.println(F("[OK] LoRa in continuous receive mode"));
     }
     
-    // Initialize TFT Display
-    tft.init(NATIVE_WIDTH, NATIVE_HEIGHT);
-    tft.setRotation(SCREEN_ROTATION);
-    tft.fillScreen(ST77XX_BLACK);
-    
-    Serial.printf("[OK] TFT initialized (%dx%d)\n", SCREEN_WIDTH, SCREEN_HEIGHT);
-    
-    // Show boot screen
+    // Show boot screen on LCD
     currentScreen = SCREEN_BOOT;
     drawBootScreen();
     playBootTone();
@@ -1955,7 +1060,6 @@ void setup() {
     loadWiFiCredentials();
     if (storedSSID.length() > 0) {
         Serial.printf("[WIFI] Auto-connecting to: %s\n", storedSSID.c_str());
-        // Try to connect (but don't open portal on failure during boot)
         connectToWiFiSilent();
     } else {
         Serial.println(F("[WIFI] No credentials - Hold EN button for 3 seconds to configure"));
@@ -1963,7 +1067,6 @@ void setup() {
     
     Serial.println(F("=== Ready to receive emergency alerts ===\n"));
     
-    // Print Serial debug menu
     #if SERIAL_DEBUG_ENABLED
     printSerialDebugMenu();
     #endif
@@ -1974,18 +1077,15 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════════
 
 void loop() {
-    // Handle WiFi portal if active
     if (portalActive) {
-        checkWiFiPortalButton();  // Allow exiting portal
+        checkWiFiPortalButton();
         handleWiFiPortal();
-        return;  // Don't process other things while portal is active
+        return;
     }
     
-    // State machine for screen management
     switch (currentScreen) {
         
         case SCREEN_BOOT:
-            // Update boot animation and check if complete
             if (updateBootAnimation()) {
                 currentScreen = SCREEN_IDLE;
                 drawIdleScreen();
@@ -1995,18 +1095,13 @@ void loop() {
             break;
             
         case SCREEN_IDLE:
-            // Check WiFi button (3 second long press)
             checkWiFiPortalButton();
-            
-            // Update idle animation
             updateIdleAnimation();
             
-            // Check for incoming LoRa packets (priority)
             {
                 int deviceId, alertIndex, rssi;
                 bool packetReceived = parseLoRaPacket(deviceId, alertIndex, rssi);
                 
-                // If no LoRa packet, check for Serial simulated packet
                 #if SERIAL_DEBUG_ENABLED
                 if (!packetReceived) {
                     packetReceived = checkSerialSimulatedPacket(deviceId, alertIndex, rssi);
@@ -2017,13 +1112,11 @@ void loop() {
                     Serial.printf("[RX] Alert received: Device=%d, Alert=%d (%s), RSSI=%d\n",
                                   deviceId, alertIndex, alertNames[alertIndex], rssi);
                     
-                    // Push alert to web dashboard API
                     pushAlertToAPI(deviceId, alertIndex, rssi);
                     
                     currentScreen = SCREEN_ALERT;
                     drawAlertScreen(deviceId, alertIndex, rssi);
                     
-                    // Set LED based on priority
                     if (alertPriority[alertIndex] <= 1) {
                         digitalWrite(LED_RED, HIGH);
                         digitalWrite(LED_GREEN, LOW);
@@ -2038,10 +1131,8 @@ void loop() {
             break;
             
         case SCREEN_ALERT:
-            // Check WiFi button (3 second long press)
             checkWiFiPortalButton();
             
-            // Check for new packets (higher priority alert would override)
             {
                 int deviceId, alertIndex, rssi;
                 bool packetReceived = parseLoRaPacket(deviceId, alertIndex, rssi);
@@ -2056,7 +1147,6 @@ void loop() {
                     Serial.printf("[RX] New alert received while displaying: Device=%d, Alert=%d\n", 
                                   deviceId, alertIndex);
                     
-                    // Push alert to web dashboard API
                     pushAlertToAPI(deviceId, alertIndex, rssi);
                     
                     drawAlertScreen(deviceId, alertIndex, rssi);
@@ -2068,7 +1158,6 @@ void loop() {
                 }
             }
             
-            // Return to idle after display time
             if (shouldReturnToIdle()) {
                 currentScreen = SCREEN_IDLE;
                 drawIdleScreen();
@@ -2080,10 +1169,8 @@ void loop() {
             
         case SCREEN_HISTORY:
         case SCREEN_SYSTEM_INFO:
-            // Reserved for future expansion
             break;
     }
     
-    // Small delay to prevent CPU hogging
     delay(10);
 }
