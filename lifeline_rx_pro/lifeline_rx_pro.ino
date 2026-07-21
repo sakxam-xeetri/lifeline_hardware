@@ -91,8 +91,12 @@
 #define LCD_ROWS    2
 
 // LED Indicator Pins
-#define LED_GREEN   21      // Success indicator (active HIGH)
-#define LED_RED     13      // Alert indicator (active HIGH)
+#define LED_WIFI    21      // WiFi connection status indicator (active HIGH when connected)
+#define LED_DATA    13      // Data receive blink indicator (active HIGH on packet RX)
+
+// Backward compatibility aliases
+#define LED_GREEN   LED_WIFI
+#define LED_RED     LED_DATA
 
 // Audio Feedback
 #define BUZZER_PIN  12      // Buzzer
@@ -273,6 +277,33 @@ int historyScrollOffset = 0;
 
 bool loraInitialized = false;
 int totalAlertsReceived = 0;
+
+// WiFi Connection State
+extern bool wifiConnected;
+
+// Data RX LED blink state (non-blocking) & WiFi Status LED update
+unsigned long rxBlinkEndTime = 0;
+#define RX_BLINK_DURATION_MS 250  // LED ON time in milliseconds when data packet is received
+
+void triggerRxBlink() {
+    digitalWrite(LED_DATA, HIGH);
+    rxBlinkEndTime = millis() + RX_BLINK_DURATION_MS;
+}
+
+void updateLEDs() {
+    // 1. WiFi LED status update (HIGH when connected, LOW otherwise)
+    if (WiFi.status() == WL_CONNECTED || wifiConnected) {
+        digitalWrite(LED_WIFI, HIGH);
+    } else {
+        digitalWrite(LED_WIFI, LOW);
+    }
+
+    // 2. Data RX LED blink timeout check
+    if (rxBlinkEndTime > 0 && millis() >= rxBlinkEndTime) {
+        digitalWrite(LED_DATA, LOW);
+        rxBlinkEndTime = 0;
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              WIFI STATE MANAGEMENT
@@ -1111,15 +1142,15 @@ void setup() {
     Serial.println(F("╚═══════════════════════════════════════════════════════════╝\n"));
     
     pinMode(BUZZER_PIN, OUTPUT);
-    pinMode(LED_GREEN, OUTPUT);
-    pinMode(LED_RED, OUTPUT);
+    pinMode(LED_WIFI, OUTPUT);
+    pinMode(LED_DATA, OUTPUT);
     pinMode(LORA_CS, OUTPUT);
     pinMode(LORA_RST, OUTPUT);
     pinMode(WIFI_PORTAL_PIN, INPUT_PULLUP); // Dedicated Push Button on GPIO 14
     
     digitalWrite(LORA_CS, HIGH);
-    digitalWrite(LED_GREEN, LOW);
-    digitalWrite(LED_RED, LOW);
+    digitalWrite(LED_WIFI, LOW);
+    digitalWrite(LED_DATA, LOW);
     
     digitalWrite(LORA_RST, LOW);
     delay(10);
@@ -1182,6 +1213,8 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════════
 
 void loop() {
+    updateLEDs();
+    
     if (portalActive) {
         checkWiFiPortalButton();
         handleWiFiPortal();
@@ -1194,7 +1227,6 @@ void loop() {
             if (updateBootAnimation()) {
                 currentScreen = SCREEN_IDLE;
                 drawIdleScreen();
-                digitalWrite(LED_GREEN, HIGH);
                 Serial.println(F("[STATE] Switched to IDLE - Listening for alerts"));
             }
             break;
@@ -1217,18 +1249,11 @@ void loop() {
                     Serial.printf("[RX] Alert received: Device=%d, Alert=%d (%s), RSSI=%d\n",
                                   deviceId, alertIndex, alertNames[alertIndex], rssi);
                     
+                    triggerRxBlink();
                     pushAlertToAPI(deviceId, alertIndex, rssi);
                     
                     currentScreen = SCREEN_ALERT;
                     drawAlertScreen(deviceId, alertIndex, rssi);
-                    
-                    if (alertPriority[alertIndex] <= 1) {
-                        digitalWrite(LED_RED, HIGH);
-                        digitalWrite(LED_GREEN, LOW);
-                    } else {
-                        digitalWrite(LED_GREEN, HIGH);
-                        digitalWrite(LED_RED, LOW);
-                    }
                     
                     Serial.println(F("[STATE] Switched to ALERT"));
                 }
@@ -1252,22 +1277,16 @@ void loop() {
                     Serial.printf("[RX] New alert received while displaying: Device=%d, Alert=%d\n", 
                                   deviceId, alertIndex);
                     
+                    triggerRxBlink();
                     pushAlertToAPI(deviceId, alertIndex, rssi);
                     
                     drawAlertScreen(deviceId, alertIndex, rssi);
-                    
-                    if (alertPriority[alertIndex] <= 1) {
-                        digitalWrite(LED_RED, HIGH);
-                        digitalWrite(LED_GREEN, LOW);
-                    }
                 }
             }
             
             if (shouldReturnToIdle()) {
                 currentScreen = SCREEN_IDLE;
                 drawIdleScreen();
-                digitalWrite(LED_GREEN, HIGH);
-                digitalWrite(LED_RED, LOW);
                 Serial.println(F("[STATE] Auto-returned to IDLE"));
             }
             break;
