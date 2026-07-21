@@ -1,0 +1,57 @@
+#ifndef DISPLAY_UI_H
+#define DISPLAY_UI_H
+
+#include "Config.h"
+#include <LiquidCrystal_I2C.h>
+
+// Global Display Instance
+extern LiquidCrystal_I2C lcd;
+
+// Global State Variables (declared extern, defined in DisplayUI.cpp or .ino)
+extern ScreenState currentScreen;
+extern unsigned long bootStartTime;
+extern unsigned long alertReceivedTime;
+extern unsigned long lastPulseTime;
+extern uint8_t pulseState;
+extern uint8_t bootDotState;
+
+extern int lastDeviceId;
+extern int lastAlertIndex;
+extern int lastRssi;
+
+extern AlertRecord alertHistory[HISTORY_MAX_ITEMS];
+extern int historyCount;
+extern int historyScrollOffset;
+extern int totalAlertsReceived;
+
+// Functions
+void initDisplay();
+void printLCDLine(uint8_t row, const String& text);
+void printLCDCenter(uint8_t row, const String& text);
+
+// Boot Screen
+void drawBootScreen();
+bool updateBootAnimation();
+
+// Idle Screen
+void drawIdleScreen();
+void updateIdleAnimation();
+
+// Alert Screen
+void drawAlertScreen(int deviceId, int alertIndex, int rssi);
+bool shouldReturnToIdle();
+
+// WiFi Screens
+void drawWiFiConnectingScreen(const String& ssid, int currentIdx, int totalCount);
+void drawWiFiConnectedScreen(const String& ip);
+void drawWiFiFailedScreen();
+void drawCountdownScreen(int remainingSec);
+void drawWiFiPortalScreen();
+
+// History
+void addToHistory(int deviceId, int alertIndex, int rssi);
+
+// Helper function
+char getAlertCode(int index);
+
+#endif // DISPLAY_UI_H
