@@ -3,7 +3,6 @@
 #include "BuzzerLED.h"
 #include <WiFi.h>
 #include <Preferences.h>
-#include <Update.h>
 
 WebServer wifiServer(80);
 DNSServer dnsServer;
@@ -24,9 +23,6 @@ String activeSSID = "";
 // Forward declarations of server handlers
 static void handlePortalRoot();
 static void handlePortalSave();
-static void handleUpdateRoot();
-static void handleUpdateDone();
-static void handleUpdateUpload();
 
 void loadWiFiCredentials() {
     preferences.begin("lifeline", true);
@@ -169,8 +165,6 @@ void startWiFiPortal() {
     
     wifiServer.on("/", handlePortalRoot);
     wifiServer.on("/save", HTTP_POST, handlePortalSave);
-    wifiServer.on("/update", HTTP_GET, handleUpdateRoot);
-    wifiServer.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
     
     // Captive portal detect endpoints -> auto pop up HTML
     wifiServer.on("/generate_204", handlePortalRoot);
@@ -294,11 +288,12 @@ void handleWiFiPortal() {
     }
 }
 
-// HTML and Endpoint Handlers (Dark Theme, Sharp Edges, Crimson Red Aesthetic)
+// HTML and Endpoint Handlers (Dark Theme, Sharp Edges, Crimson Red Aesthetic, Clean ASCII Text)
 static String getPortalHTML() {
     String html = "<!DOCTYPE html><html><head>";
+    html += "<meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-    html += "<title>LIFELINE RX — CAPTIVE PORTAL</title>";
+    html += "<title>LIFELINE RX - CAPTIVE PORTAL</title>";
     html += "<style>";
     html += "* { box-sizing: border-box; border-radius: 0px !important; }";
     html += "body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #08080c; color: #f4f4f7; margin: 0; padding: 20px 15px; }";
@@ -306,7 +301,6 @@ static String getPortalHTML() {
     html += ".header { border-bottom: 2px solid #ff1e42; padding-bottom: 12px; margin-bottom: 20px; text-align: left; }";
     html += "h1 { color: #ffffff; font-size: 22px; margin: 0 0 5px 0; font-weight: 800; letter-spacing: 1px; }";
     html += ".brand-sub { color: #ff1e42; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }";
-    html += ".dot { color: #ff1e42; display: inline-block; font-size: 14px; text-shadow: 0 0 8px #ff1e42; }";
     html += ".info-box { background: #1a1a24; border-left: 3px solid #ff1e42; padding: 10px 12px; margin-bottom: 22px; font-size: 12px; color: #b3b3c2; line-height: 1.4; }";
     html += "h2 { color: #ffffff; font-size: 13px; font-weight: 700; margin: 18px 0 8px 0; text-transform: uppercase; letter-spacing: 1px; border-left: 2px solid #ff1e42; padding-left: 8px; }";
     html += "label { display: block; font-size: 11px; color: #8c8c9e; text-transform: uppercase; font-weight: 700; margin-top: 8px; margin-bottom: 4px; letter-spacing: 0.5px; }";
@@ -314,14 +308,12 @@ static String getPortalHTML() {
     html += "input[type=text]:focus, input[type=password]:focus { border-color: #ff1e42; box-shadow: 0 0 10px rgba(255, 30, 66, 0.4); }";
     html += "input[type=submit] { width: 100%; padding: 14px; background: #ff1e42; color: #ffffff; border: 1px solid #ff1e42; cursor: pointer; font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-top: 15px; transition: background 0.2s, box-shadow 0.2s; box-shadow: 0 0 12px rgba(255, 30, 66, 0.3); }";
     html += "input[type=submit]:hover { background: #e01235; box-shadow: 0 0 20px rgba(255, 30, 66, 0.6); }";
-    html += ".ota-btn { display: block; text-align: center; margin-top: 15px; padding: 12px; background: #1a1a24; color: #ff1e42; border: 1px solid #ff1e42; text-decoration: none; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; transition: background 0.2s; }";
-    html += ".ota-btn:hover { background: #ff1e42; color: #ffffff; }";
     html += ".status { text-align: center; margin-top: 20px; padding: 8px; font-size: 11px; background: #0a0a0f; border: 1px solid #282836; color: #727285; letter-spacing: 0.5px; }";
     html += "</style></head><body>";
     html += "<div class='container'>";
     html += "<div class='header'>";
-    html += "<h1>LIFELINE RX <span class='dot'>●</span></h1>";
-    html += "<div class='brand-sub'>Base Station — Captive WiFi Setup</div>";
+    html += "<h1>LIFELINE RX</h1>";
+    html += "<div class='brand-sub'>Base Station - Captive WiFi Setup</div>";
     html += "</div>";
     html += "<div class='info-box'>Configure 1, 2, or 3 WiFi networks. Network 1 is primary. Leave Network 2 & 3 blank if using only 1 WiFi network.</div>";
     html += "<form action='/save' method='POST'>";
@@ -341,37 +333,8 @@ static String getPortalHTML() {
     html += "<input type='submit' value='SAVE & CONNECT WI-FI'>";
     html += "</form>";
     
-    html += "<a class='ota-btn' href='/update'>⚡ WIRELESS OTA FIRMWARE UPDATE</a>";
-    
     html += "<div class='status'>STORED NETWORKS: " + String(networkCount) + " / 3</div>";
     
-    html += "</div></body></html>";
-    return html;
-}
-
-static String getUpdateHTML() {
-    String html = "<!DOCTYPE html><html><head>";
-    html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-    html += "<title>LIFELINE RX — OTA FIRMWARE</title>";
-    html += "<style>";
-    html += "* { box-sizing: border-box; border-radius: 0px !important; }";
-    html += "body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; background: #08080c; color: #f4f4f7; margin: 0; padding: 25px 15px; }";
-    html += ".container { max-width: 440px; margin: 0 auto; background: #121218; padding: 25px 22px; border: 1px solid #ff1e42; box-shadow: 0 0 25px rgba(255, 30, 66, 0.15); }";
-    html += "h1 { color: #ffffff; font-size: 20px; margin: 0 0 10px 0; border-bottom: 2px solid #ff1e42; padding-bottom: 8px; letter-spacing: 1px; }";
-    html += "p { font-size: 13px; color: #b3b3c2; line-height: 1.5; margin-bottom: 20px; }";
-    html += "input[type=file] { width: 100%; padding: 12px; margin-bottom: 15px; background: #0a0a0f; color: #ffffff; border: 1px solid #282836; font-size: 12px; }";
-    html += "input[type=submit] { width: 100%; padding: 14px; background: #ff1e42; color: #ffffff; border: 1px solid #ff1e42; font-weight: 800; font-size: 14px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 0 12px rgba(255, 30, 66, 0.3); }";
-    html += "input[type=submit]:hover { background: #e01235; }";
-    html += ".back { display: block; text-align: center; margin-top: 20px; color: #ff1e42; text-decoration: none; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }";
-    html += "</style></head><body>";
-    html += "<div class='container'>";
-    html += "<h1>OTA FIRMWARE FLASH</h1>";
-    html += "<p>Select and upload compiled <b>firmware.bin</b> file to update Lifeline RX wirelessly over WiFi.</p>";
-    html += "<form method='POST' action='/update' enctype='multipart/form-data'>";
-    html += "<input type='file' name='update' accept='.bin' required>";
-    html += "<input type='submit' value='UPLOAD & FLASH FIRMWARE'>";
-    html += "</form>";
-    html += "<a class='back' href='/'>← RETURN TO CAPTIVE PORTAL</a>";
     html += "</div></body></html>";
     return html;
 }
@@ -399,8 +362,9 @@ static void handlePortalSave() {
     saveWiFiCredentialsList(newNets, count);
     
     String html = "<!DOCTYPE html><html><head>";
+    html += "<meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-    html += "<title>LIFELINE RX — SAVED</title>";
+    html += "<title>LIFELINE RX - SAVED</title>";
     html += "<style>* { box-sizing: border-box; border-radius: 0px !important; } body{font-family:'Segoe UI',sans-serif;background:#08080c;color:#fff;text-align:center;padding:50px 15px;}";
     html += ".card{background:#121218;border:1px solid #ff1e42;padding:30px 20px;max-width:420px;margin:0 auto;box-shadow:0 0 25px rgba(255,30,66,0.2);}";
     html += "h2{color:#ff1e42;font-size:20px;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;} p{color:#b3b3c2;font-size:13px;}</style></head><body>";
@@ -413,58 +377,4 @@ static void handlePortalSave() {
     
     delay(2000);
     ESP.restart();
-}
-
-static void handleUpdateRoot() {
-    wifiServer.send(200, "text/html", getUpdateHTML());
-}
-
-static void handleUpdateDone() {
-    String html = "<!DOCTYPE html><html><head>";
-    html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-    html += "<title>LIFELINE RX — FLASH SUCCESS</title>";
-    html += "<style>* { box-sizing: border-box; border-radius: 0px !important; } body{font-family:'Segoe UI',sans-serif;background:#08080c;color:#fff;text-align:center;padding:50px 15px;}";
-    html += ".card{background:#121218;border:1px solid #ff1e42;padding:30px 20px;max-width:420px;margin:0 auto;box-shadow:0 0 25px rgba(255,30,66,0.2);}";
-    html += "h2{color:#ff1e42;font-size:20px;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;} p{color:#b3b3c2;font-size:13px;}</style></head><body>";
-    html += "<div class='card'><h2>OTA FLASH COMPLETE</h2>";
-    html += "<p>Firmware uploaded successfully. Rebooting Base Station...</p></div>";
-    html += "</body></html>";
-    
-    wifiServer.send(200, "text/html", html);
-    delay(2000);
-    ESP.restart();
-}
-
-static void handleUpdateUpload() {
-    HTTPUpload& upload = wifiServer.upload();
-    if (upload.status == UPLOAD_FILE_START) {
-        Serial.printf("[OTA] Update Start: %s\n", upload.filename.c_str());
-        printLCDLine(0, "OTA Flashing...");
-        printLCDLine(1, "Progress: 0%");
-        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-            Update.printError(Serial);
-        }
-    } else if (upload.status == UPLOAD_FILE_WRITE) {
-        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-            Update.printError(Serial);
-        }
-        int percent = 0;
-        if (Update.size() > 0) {
-            percent = (Update.progress() * 100) / Update.size();
-        }
-        char prg[17];
-        snprintf(prg, sizeof(prg), "Progress: %d%%", percent);
-        printLCDLine(1, prg);
-    } else if (upload.status == UPLOAD_FILE_END) {
-        if (Update.end(true)) {
-            Serial.printf("[OTA] Success! Total size: %u B\n", upload.totalSize);
-            printLCDLine(0, "OTA Success!");
-            printLCDLine(1, "Rebooting...");
-            playBootTone();
-        } else {
-            Update.printError(Serial);
-            printLCDLine(0, "OTA Failed!");
-            printLCDLine(1, "Error Flashing");
-        }
-    }
 }
