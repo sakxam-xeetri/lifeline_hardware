@@ -28,6 +28,13 @@ private:
                                          const GPSData& gps,
                                          const EmergencyState& emergency,
                                          const SystemHealthMetrics& health);
+
+    void printLiveSensorDiagnostics(const EnvironmentData& env,
+                                    const MotionData& motion,
+                                    const GasData& gas,
+                                    const GPSData& gps,
+                                    const EmergencyState& emergency,
+                                    const SystemHealthMetrics& health);
 };
 
 extern SensorManager sensorManager;

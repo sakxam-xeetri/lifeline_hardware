@@ -55,6 +55,10 @@ void SensorManager::loop() {
 
         TelemetryPacket pkt = buildTelemetryPacket(env, motion, gas, gps, emergency, health);
         
+        #if SPU_DEBUG_ENABLE
+        printLiveSensorDiagnostics(env, motion, gas, gps, emergency, health);
+        #endif
+
         // Blink LED on transmit
         digitalWrite(STATUS_LED_PIN, HIGH);
         uartManager.sendTelemetry(pkt);
@@ -107,4 +111,53 @@ TelemetryPacket SensorManager::buildTelemetryPacket(const EnvironmentData& env,
     pkt.crc16 = calculate_crc16((const uint8_t*)&pkt, sizeof(TelemetryPacket) - sizeof(uint16_t));
 
     return pkt;
+}
+
+void SensorManager::printLiveSensorDiagnostics(const EnvironmentData& env,
+                                                const MotionData& motion,
+                                                const GasData& gas,
+                                                const GPSData& gps,
+                                                const EmergencyState& emergency,
+                                                const SystemHealthMetrics& health) {
+    Serial.println(F("\n=================================================="));
+    Serial.println(F("           SPU LIVE SENSOR DIAGNOSTIC DASHBOARD   "));
+    Serial.println(F("=================================================="));
+
+    // 1. Environmental Sensor (DHT11/22 & Battery)
+    if (env.valid) {
+        Serial.printf("[ENV] Temp: %.1f °C | Humidity: %.1f %% | Batt: %.2fV (%d%%)\n",
+                      env.temperature_c, env.humidity_pct, env.battery_voltage, env.battery_percent);
+    } else {
+        Serial.println(F("[ENV] DHT Sensor Read Failure / Not Detected!"));
+    }
+
+    // 2. Gas Sensor (MQ135)
+    Serial.printf("[GAS] MQ135 PPM: %u PPM | Warning: %s | Danger: %s\n",
+                  gas.ppm_estimate,
+                  gas.is_gas_warning ? "YES" : "NO",
+                  gas.is_gas_danger ? "YES" : "NO");
+
+    // 3. Motion & IMU Sensor (MPU6050)
+    Serial.printf("[MPU] Accel (G): X=%.2f Y=%.2f Z=%.2f | Total: %.2fG | Tilt: %.1f°\n",
+                  motion.accel_x, motion.accel_y, motion.accel_z, motion.total_accel_g, motion.tilt_deg);
+    Serial.printf("[MPU] Flags: Motion=%s | Impact=%s | Fall=%s | Earthquake=%s\n",
+                  motion.is_motion_detected ? "YES" : "NO",
+                  motion.is_sudden_impact ? "YES" : "NO",
+                  motion.is_free_fall ? "YES" : "NO",
+                  motion.is_earthquake_vibration ? "YES" : "NO");
+
+    // 4. GPS Module (NEO-6M)
+    if (gps.fix_valid) {
+        Serial.printf("[GPS] Fix: VALID (%d Sats) | Lat: %.6f | Lon: %.6f | Alt: %.1fm\n",
+                      gps.satellites, gps.latitude, gps.longitude, gps.altitude_m);
+    } else {
+        Serial.printf("[GPS] Fix: SEARCHING... (%d Satellites Seen)\n", gps.satellites);
+    }
+
+    // 5. Emergency Engine & Health Scores
+    Serial.printf("[SYS] Emergency Status: '%c' (%s) | Priority: %d\n",
+                  emergency.code, emergency.description, emergency.priority);
+    Serial.printf("[SYS] Health Score: %d%% | Environmental Risk Score: %d%%\n",
+                  health.node_health_score, health.environmental_risk_score);
+    Serial.println(F("=================================================="));
 }
