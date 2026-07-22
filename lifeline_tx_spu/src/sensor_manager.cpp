@@ -119,45 +119,61 @@ void SensorManager::printLiveSensorDiagnostics(const EnvironmentData& env,
                                                 const GPSData& gps,
                                                 const EmergencyState& emergency,
                                                 const SystemHealthMetrics& health) {
-    Serial.println(F("\n=================================================="));
-    Serial.println(F("           SPU LIVE SENSOR DIAGNOSTIC DASHBOARD   "));
-    Serial.println(F("=================================================="));
+    Serial.println(F("\n┌─────────────────────────────────────────────────────────────┐"));
+    Serial.println(F("│       SPU STEP-BY-STEP SENSOR DIAGNOSTIC REPORT             │"));
+    Serial.println(F("└─────────────────────────────────────────────────────────────┘"));
 
-    // 1. Environmental Sensor (DHT11/22 & Battery)
+    // STEP 1: Environmental Sensor
+    Serial.println(F("\n[STEP 1/5] ENVIRONMENTAL SENSOR (DHT11 / DHT22 & BATTERY)"));
+    Serial.println(F("-------------------------------------------------------------"));
     if (env.valid) {
-        Serial.printf("[ENV] Temp: %.1f °C | Humidity: %.1f %% | Batt: %.2fV (%d%%)\n",
-                      env.temperature_c, env.humidity_pct, env.battery_voltage, env.battery_percent);
+        Serial.printf("  • Temperature       : %.1f °C\n", env.temperature_c);
+        Serial.printf("  • Humidity          : %.1f %%\n", env.humidity_pct);
+        Serial.printf("  • Battery Voltage   : %.2f V (%d%% Charged)\n", env.battery_voltage, env.battery_percent);
+        Serial.println(F("  • Sensor Status     : OK (Connected & Reading)"));
     } else {
-        Serial.println(F("[ENV] DHT Sensor Read Failure / Not Detected!"));
+        Serial.println(F("  • Sensor Status     : FAILED / NOT CONNECTED (Check Pin 23)"));
     }
 
-    // 2. Gas Sensor (MQ135)
-    Serial.printf("[GAS] MQ135 PPM: %u PPM | Warning: %s | Danger: %s\n",
-                  gas.ppm_estimate,
-                  gas.is_gas_warning ? "YES" : "NO",
-                  gas.is_gas_danger ? "YES" : "NO");
+    // STEP 2: Gas Sensor
+    Serial.println(F("\n[STEP 2/5] AIR QUALITY & GAS SENSOR (MQ135)"));
+    Serial.println(F("-------------------------------------------------------------"));
+    Serial.printf("  • Gas Concentration : %u PPM\n", gas.ppm_estimate);
+    Serial.printf("  • Pollution Warning : %s\n", gas.is_gas_warning ? "ALERT! HIGH POLLUTION" : "NO (Normal)");
+    Serial.printf("  • Fire / Smoke Risk : %s\n", gas.is_gas_danger ? "CRITICAL! DANGER LEVEL" : "NO (Normal)");
 
-    // 3. Motion & IMU Sensor (MPU6050)
-    Serial.printf("[MPU] Accel (G): X=%.2f Y=%.2f Z=%.2f | Total: %.2fG | Tilt: %.1f°\n",
-                  motion.accel_x, motion.accel_y, motion.accel_z, motion.total_accel_g, motion.tilt_deg);
-    Serial.printf("[MPU] Flags: Motion=%s | Impact=%s | Fall=%s | Earthquake=%s\n",
-                  motion.is_motion_detected ? "YES" : "NO",
-                  motion.is_sudden_impact ? "YES" : "NO",
-                  motion.is_free_fall ? "YES" : "NO",
-                  motion.is_earthquake_vibration ? "YES" : "NO");
+    // STEP 3: Motion & IMU Sensor
+    Serial.println(F("\n[STEP 3/5] MOTION & SEISMIC SENSOR (MPU6050 6-DOF IMU)"));
+    Serial.println(F("-------------------------------------------------------------"));
+    Serial.printf("  • Raw Accel (X,Y,Z) : X=%.2fG, Y=%.2fG, Z=%.2fG\n", motion.accel_x, motion.accel_y, motion.accel_z);
+    Serial.printf("  • Gyro Rate (X,Y,Z) : X=%.1f°/s, Y=%.1f°/s, Z=%.1f°/s\n", motion.gyro_x, motion.gyro_y, motion.gyro_z);
+    Serial.printf("  • Vector Magnitude  : %.2f G\n", motion.total_accel_g);
+    Serial.printf("  • Dynamic Tilt Angle: %.1f°\n", motion.tilt_deg);
+    Serial.printf("  • Motion Detected   : %s\n", motion.is_motion_detected ? "YES (Moving)" : "NO (Still)");
+    Serial.printf("  • Sudden Impact     : %s\n", motion.is_sudden_impact ? "YES (Spike Detected!)" : "NO");
+    Serial.printf("  • Free Fall         : %s\n", motion.is_free_fall ? "YES (Free Fall Detected!)" : "NO");
+    Serial.printf("  • Seismic Anomaly   : %s\n", motion.is_earthquake_vibration ? "ALERT! SEISMIC VIBRATION" : "NO");
 
-    // 4. GPS Module (NEO-6M)
+    // STEP 4: GPS Navigation Module
+    Serial.println(F("\n[STEP 4/5] GPS NAVIGATION MODULE (NEO-6M)"));
+    Serial.println(F("-------------------------------------------------------------"));
     if (gps.fix_valid) {
-        Serial.printf("[GPS] Fix: VALID (%d Sats) | Lat: %.6f | Lon: %.6f | Alt: %.1fm\n",
-                      gps.satellites, gps.latitude, gps.longitude, gps.altitude_m);
+        Serial.println(F("  • GPS Fix Status    : VALID FIX (Lock Acquired)"));
+        Serial.printf("  • Satellites in View: %d Satellites\n", gps.satellites);
+        Serial.printf("  • Latitude          : %.6f°\n", gps.latitude);
+        Serial.printf("  • Longitude         : %.6f°\n", gps.longitude);
+        Serial.printf("  • Altitude          : %.1f meters\n", gps.altitude_m);
     } else {
-        Serial.printf("[GPS] Fix: SEARCHING... (%d Satellites Seen)\n", gps.satellites);
+        Serial.printf("  • GPS Fix Status    : SEARCHING FOR SATELLITES... (%d Seen)\n", gps.satellites);
+        Serial.println(F("  • Tip               : Move antenna outdoors for satellite lock"));
     }
 
-    // 5. Emergency Engine & Health Scores
-    Serial.printf("[SYS] Emergency Status: '%c' (%s) | Priority: %d\n",
-                  emergency.code, emergency.description, emergency.priority);
-    Serial.printf("[SYS] Health Score: %d%% | Environmental Risk Score: %d%%\n",
-                  health.node_health_score, health.environmental_risk_score);
-    Serial.println(F("=================================================="));
+    // STEP 5: Emergency Engine & Health
+    Serial.println(F("\n[STEP 5/5] EMERGENCY FUSION ENGINE & SYSTEM HEALTH"));
+    Serial.println(F("-------------------------------------------------------------"));
+    Serial.printf("  • Active Emergency  : '%c' (%s)\n", emergency.code, emergency.description);
+    Serial.printf("  • Priority Level    : %d (1=Normal, 5=SOS/Critical)\n", emergency.priority);
+    Serial.printf("  • Node Health Score : %d %%\n", health.node_health_score);
+    Serial.printf("  • Env Risk Score    : %d %%\n", health.environmental_risk_score);
+    Serial.println(F("=============================================================\n"));
 }
