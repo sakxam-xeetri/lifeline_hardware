@@ -2,39 +2,17 @@
 
 EmergencyDetector emergencyDetector;
 
-EmergencyDetector::EmergencyDetector() : _last_sos_press(0) {
+EmergencyDetector::EmergencyDetector() {
     _state = {EMERGENCY_NONE, PRIORITY_NORMAL, "NORMAL", false};
 }
 
 void EmergencyDetector::begin() {
-    pinMode(SOS_BUTTON_PIN, INPUT_PULLUP);
     #if SPU_DEBUG_ENABLE
-    Serial.println(F("[EMERGENCY] SOS Hardware Interrupt Pin Initialized."));
+    Serial.println(F("[EMERGENCY] Emergency Fusion Detector Initialized."));
     #endif
 }
 
-void EmergencyDetector::checkSOSButton() {
-    if (digitalRead(SOS_BUTTON_PIN) == LOW) {
-        if (millis() - _last_sos_press > SOS_DEBOUNCE_MS) {
-            _last_sos_press = millis();
-            _state.code = EMERGENCY_SOS;
-            _state.priority = PRIORITY_CRITICAL;
-            _state.description = "MANUAL SOS EMERGENCY";
-            _state.is_active = true;
-            #if SPU_DEBUG_ENABLE
-            Serial.println(F("[EMERGENCY OVERRIDE] Manual SOS Button Pressed!"));
-            #endif
-        }
-    }
-}
-
 void EmergencyDetector::update(const EnvironmentData& env, const MotionData& motion, const GasData& gas) {
-    // Hardware SOS Button always takes highest precedence
-    checkSOSButton();
-    if (_state.code == EMERGENCY_SOS && _state.is_active) {
-        return;
-    }
-
     // 1. SENSOR FUSION: Forest Fire / High Gas Fire Danger
     if (gas.is_gas_danger && env.temperature_c >= THRESHOLD_FIRE_TEMP) {
         _state.code = EMERGENCY_FIRE;
@@ -94,15 +72,6 @@ void EmergencyDetector::update(const EnvironmentData& env, const MotionData& mot
         _state.code = EMERGENCY_HUMIDITY;
         _state.priority = PRIORITY_LOW;
         _state.description = "HIGH HUMIDITY WARNING";
-        _state.is_active = true;
-        return;
-    }
-
-    // 8. Low Battery Maintenance Alert
-    if (env.battery_percent <= BATTERY_LOW_PERCENT) {
-        _state.code = EMERGENCY_BATTERY;
-        _state.priority = PRIORITY_LOW;
-        _state.description = "LOW BATTERY WARNING";
         _state.is_active = true;
         return;
     }

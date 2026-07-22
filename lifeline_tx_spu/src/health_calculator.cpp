@@ -11,11 +11,6 @@ SystemHealthMetrics HealthCalculator::calculate(const EnvironmentData& env,
     int health = 100;
     if (!env.valid) health -= 15;
     if (!gps.fix_valid) health -= 10;
-    
-    // Battery degradation penalty
-    if (env.battery_percent < 50) {
-        health -= (50 - env.battery_percent) / 2;
-    }
     metrics.node_health_score = (uint8_t)std::max(0, std::min(100, health));
 
     // 2. Calculate Environmental Risk Score (0% ideal, 100% maximum danger)

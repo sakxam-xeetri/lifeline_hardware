@@ -9,8 +9,6 @@ struct EnvironmentData {
     float temperature_c;
     float humidity_pct;
     float pressure_hpa; // 1013.25 default unless BME280 connected
-    float battery_voltage;
-    uint8_t battery_percent;
     bool valid;
 };
 
@@ -24,7 +22,6 @@ public:
 private:
     DHT _dht;
     EnvironmentData _data;
-    void readBattery();
 };
 
 extern EnvironmentManager envManager;

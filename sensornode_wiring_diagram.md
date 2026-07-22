@@ -17,11 +17,11 @@ This document provides the parallel physical pinout map, side-by-side header tab
       VP  (GPIO 36 Analog)[ 2]                 [29]  GND -------> Common Ground
       VN  (GPIO 39 Analog)[ 3]                 [28]  GPIO 15 ---> NEO-6M GPS TX
   MQ135 Gas (Analog AO) ->[ 4] GPIO 34         [27]  GPIO 2  ---> Status LED
-Battery ADC (Divider)  ->[ 5] GPIO 35         [26]  GPIO 4  ---> NEO-6M GPS RX
+          (Reserved Pin)  [ 5] GPIO 35         [26]  GPIO 4  ---> NEO-6M GPS RX
           (Reserved Pin)  [ 6] GPIO 32         [25]  GPIO 16 <--- CCU RX2 (UART)
           (Reserved Pin)  [ 7] GPIO 33         [24]  GPIO 17 ---> CCU TX2 (UART)
           (Reserved Pin)  [ 8] GPIO 25         [23]  GPIO 5  ---> SPI SCK (CCU)
-  SOS Button (Active LOW)->[ 9] GPIO 26         [22]  GPIO 18 ---> SPI CS  (CCU)
+          (Reserved Pin)  [ 9] GPIO 26         [22]  GPIO 18 ---> SPI CS  (CCU)
      SPI MOSI (CCU LoRa) ->[10] GPIO 27         [21]  GPIO 19 ---> SPI MISO (CCU)
           (Reserved Pin)  [11] GPIO 14         [20]  GPIO 21 ---> MPU6050 I2C SDA
           (Reserved Pin)  [12] GPIO 12         [19]  GPIO 3  ---> USB RX0 (Debug)
@@ -42,8 +42,8 @@ Battery ADC (Divider)  ->[ 5] GPIO 35         [26]  GPIO 4  ---> NEO-6M GPS RX
 | **VIN (Pin 15)** | **+5V Power Rail** | **3V3 (Pin 30)** | **+3.3V Sensor Power Rail** |
 | **GND (Pin 14)** | **Common Ground** | **GND (Pin 29)** | **Common Ground** |
 | **GPIO 34 (Pin 4)**| **MQ135 Gas Analog (AO)** | **GPIO 23 (Pin 16)**| **DHT11 / DHT22 Data** |
-| **GPIO 35 (Pin 5)**| **Battery ADC (Divider)** | **GPIO 22 (Pin 17)**| **MPU6050 I2C SCL** |
-| **GPIO 26 (Pin 9)**| **Hardware SOS Button** | **GPIO 21 (Pin 20)**| **MPU6050 I2C SDA** |
+| *GPIO 35 (Pin 5)* | *Reserved for Expansion* | **GPIO 22 (Pin 17)**| **MPU6050 I2C SCL** |
+| *GPIO 26 (Pin 9)* | *Reserved for Expansion* | **GPIO 21 (Pin 20)**| **MPU6050 I2C SDA** |
 | *GPIO 32 (Pin 6)* | *Reserved for Expansion* | **GPIO 17 (Pin 24)**| **UART2 TX $\rightarrow$ CCU RX2** |
 | *GPIO 33 (Pin 7)* | *Reserved for Expansion* | **GPIO 16 (Pin 25)**| **UART2 RX $\leftarrow$ CCU TX2** |
 | *GPIO 25 (Pin 8)* | *Reserved for Expansion* | **GPIO 4 (Pin 26)** | **Hardware Serial 1 TX $\rightarrow$ GPS RX** |
@@ -67,21 +67,12 @@ Battery ADC (Divider)  ->[ 5] GPIO 35         [26]  GPIO 4  ---> NEO-6M GPS RX
 
 ---
 
-## 3. Power Distribution & Resistor Specs
+## 3. Power Distribution
 
 ### A. Power Lines
 - **5V Vin Rail**: Feeds ESP32 #1 Vin, ESP32 #2 Vin, and MQ135 VCC.
 - **3.3V Rail**: Feeds DHT11/22 VCC, MPU6050 VCC, NEO-6M GPS VCC, and LoRa SX1278 VCC.
 - **Common GND**: All components MUST share a unified Ground line.
-
-### B. Resistor Divider Circuit for Battery ADC (GPIO 35)
-```text
-  Li-Ion Battery (+) --- [ 10k Ohm (R1) ] ---*--- [ 10k Ohm (R2) ] --- GND
-                                              |
-                                      ESP32 #1 GPIO 35
-```
-$$\text{V}_{\text{ADC}} = \frac{\text{V}_{\text{Battery}}}{2}$$
-For a full battery ($4.2\text{V}$), input voltage to GPIO 35 is $2.1\text{V}$ (safe for ESP32 ADC).
 
 ---
 

@@ -21,15 +21,11 @@ public:
     EmergencyDetector();
     void begin();
     void update(const EnvironmentData& env, const MotionData& motion, const GasData& gas);
-    
-    // Hardware SOS Button Handler
-    void checkSOSButton();
 
     const EmergencyState& getState() const { return _state; }
 
 private:
     EmergencyState _state;
-    unsigned long _last_sos_press;
 };
 
 extern EmergencyDetector emergencyDetector;

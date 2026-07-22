@@ -35,10 +35,8 @@
 
 // Analog Sensor Pins
 #define MQ135_PIN               34               // Analog pin for MQ135 Gas Sensor
-#define BATTERY_ADC_PIN         35               // ADC pin for Battery Divider (Voltage = ADC * 2 * 3.3 / 4095)
 
 // Digital Inputs & Controls
-#define SOS_BUTTON_PIN          26               // Physical Emergency SOS Button (Active LOW, Internal Pullup)
 #define STATUS_LED_PIN          2                // Built-in status LED indicator
 
 // ═══════════════════════════════════════════════════════════════════════════════════
@@ -64,11 +62,6 @@
 #define THRESHOLD_VIBE_EARTHQ   1.8f             // Acceleration magnitude G for earthquake vibration
 #define EARTHQUAKE_VIBE_WINDOW  15               // Consecutive samples above threshold for Earthquake
 
-// Battery & Power Thresholds
-#define BATTERY_MAX_V           4.2f             // Li-Ion Full Voltage
-#define BATTERY_MIN_V           3.3f             // Li-Ion Cutoff Voltage
-#define BATTERY_LOW_PERCENT     15               // % Low Battery threshold
-
 // ═══════════════════════════════════════════════════════════════════════════════════
 //                              TIMING & SAMPLING INTERVALS
 // ═══════════════════════════════════════════════════════════════════════════════════
@@ -76,6 +69,5 @@
 #define SENSOR_SAMPLE_INTERVAL  200              // ms - High frequency sensor loop (5 Hz)
 #define TELEMETRY_SEND_INTERVAL 3000             // ms - Standard telemetry packet dispatch (3s)
 #define EMERGENCY_SEND_INTERVAL 500              // ms - Rapid emergency dispatch interval (0.5s)
-#define SOS_DEBOUNCE_MS         50               // ms - Debounce for hardware SOS button
 
 #endif // CONFIG_SPU_H

@@ -84,7 +84,7 @@ TelemetryPacket SensorManager::buildTelemetryPacket(const EnvironmentData& env,
     pkt.priority = emergency.priority;
     pkt.health_score = health.node_health_score;
     pkt.risk_score = health.environmental_risk_score;
-    pkt.battery_percent = env.battery_percent;
+    pkt.battery_percent = 100; // Default nominal 100% (Battery ADC disabled)
 
     // GPS conversion
     pkt.lat_deg_e7 = (int32_t)(gps.latitude * 1e7);
@@ -124,12 +124,11 @@ void SensorManager::printLiveSensorDiagnostics(const EnvironmentData& env,
     Serial.println(F("└─────────────────────────────────────────────────────────────┘"));
 
     // STEP 1: Environmental Sensor
-    Serial.println(F("\n[STEP 1/5] ENVIRONMENTAL SENSOR (DHT11 / DHT22 & BATTERY)"));
+    Serial.println(F("\n[STEP 1/5] ENVIRONMENTAL SENSOR (DHT11 / DHT22)"));
     Serial.println(F("-------------------------------------------------------------"));
     if (env.valid) {
         Serial.printf("  • Temperature       : %.1f °C\n", env.temperature_c);
         Serial.printf("  • Humidity          : %.1f %%\n", env.humidity_pct);
-        Serial.printf("  • Battery Voltage   : %.2f V (%d%% Charged)\n", env.battery_voltage, env.battery_percent);
         Serial.println(F("  • Sensor Status     : OK (Connected & Reading)"));
     } else {
         Serial.println(F("  • Sensor Status     : FAILED / NOT CONNECTED (Check Pin 23)"));
@@ -172,7 +171,7 @@ void SensorManager::printLiveSensorDiagnostics(const EnvironmentData& env,
     Serial.println(F("\n[STEP 5/5] EMERGENCY FUSION ENGINE & SYSTEM HEALTH"));
     Serial.println(F("-------------------------------------------------------------"));
     Serial.printf("  • Active Emergency  : '%c' (%s)\n", emergency.code, emergency.description);
-    Serial.printf("  • Priority Level    : %d (1=Normal, 5=SOS/Critical)\n", emergency.priority);
+    Serial.printf("  • Priority Level    : %d (1=Normal, 5=Critical)\n", emergency.priority);
     Serial.printf("  • Node Health Score : %d %%\n", health.node_health_score);
     Serial.printf("  • Env Risk Score    : %d %%\n", health.environmental_risk_score);
     Serial.println(F("=============================================================\n"));
